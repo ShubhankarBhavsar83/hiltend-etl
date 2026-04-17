@@ -1,0 +1,43 @@
+# ===========================================================
+# 1. Global: Operating System & IDEs
+# ===========================================================
+**/.DS_Store
+**/Thumbs.db
+**/.vscode/
+**/.idea/
+
+# ===========================================================
+# 2. Global: Secrets & Env Variables (CRITICAL)
+# ===========================================================
+**/.env
+**/.env.*
+**/*.pem
+
+# ===========================================================
+# 3. Frontend / Node Environments
+# ===========================================================
+**/node_modules/
+**/dist/
+**/dist-ssr/
+**/.eslintcache
+**/*.tsbuildinfo
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+# ===========================================================
+# 4. Backend / Python Environments
+# ===========================================================
+**/.venv/
+**/venv/
+**/env/
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/htmlcov/
+**/*.sqlite3
+**/*.db

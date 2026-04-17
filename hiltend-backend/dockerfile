@@ -1,0 +1,51 @@
+ARG PYTHON_VERSION=python:3.14
+
+# Builder Stage
+FROM ${PYTHON_VERSION}-slim AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+WORKDIR /build
+
+RUN uv venv /opt/venv
+
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY requirements.txt .
+
+RUN uv pip install --no-cache -r requirements.txt
+
+
+# Runtime Stage
+FROM ${PYTHON_VERSION}-slim
+
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+
+
+# Azure SQL Driver Dependencies 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    apt-transport-https \ 
+    gnupg \
+    unixodbc \
+    ca-certificates\
+    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+    && curl -fsSL https://packages.microsoft.com/config/debian/12/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+
+COPY --from=builder /opt/venv /opt/venv
+
+COPY . .
+
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
