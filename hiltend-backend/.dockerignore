@@ -1,0 +1,49 @@
+
+# Virtual Environments (CRITICAL)
+.venv/
+venv/
+env/
+
+# Environment Variables & Secrets (CRITICAL)
+.env
+.env.*
+*.pem
+
+
+# Python Cache & Build Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+
+# Git & OS Hidden Files
+.git/
+.gitignore
+.DS_Store
+Thumbs.db
+
+
+# IDE & Editor Workspaces
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing & Tooling Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.db
+
+
+# Docker Files
+Dockerfile
+.dockerignore
