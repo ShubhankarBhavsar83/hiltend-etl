@@ -15,11 +15,13 @@ function App() {
     };
 
     const callSecureApi = async () => {
+        console.log("1- Button Clicked...");
         try {
             const response = await instance.acquireTokenSilent({
                 ...loginRequest,
                 account: accounts[0]
             });
+            console.log("2- Token Acquired...");
 
             const res = await fetch("http://localhost:8000/secure", {
                 headers: {

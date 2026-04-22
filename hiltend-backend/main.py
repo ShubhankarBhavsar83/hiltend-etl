@@ -19,10 +19,6 @@ azure_scheme = SingleTenantAzureAuthorizationCodeBearer(
     app_client_id=settings.AZURE_CLIENT_ID,
     tenant_id=settings.AZURE_TENANT_ID,
     allow_guest_users=True,
-    audiences=[
-        settings.AZURE_CLIENT_ID,
-        f"api://{settings.AZURE_CLIENT_ID}" # <--- ADD THIS LINE
-    ],
     scopes={
         f"api://{settings.AZURE_CLIENT_ID}/hiltend-auth-access": "Access API as User"
     }
