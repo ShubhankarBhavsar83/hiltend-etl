@@ -4,12 +4,18 @@ from fastapi import FastAPI, Depends, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_azure_auth import SingleTenantAzureAuthorizationCodeBearer
 from pydantic_settings import BaseSettings
+from pydantic import Field
+from azure.identity import DefaultAzureCredential
+from azure.storage.filedatalake import DataLakeServiceClient
+
+
+
 
 
 class Settings(BaseSettings):
-    AZURE_TENANT_ID: str
-    AZURE_CLIENT_ID: str
-    AZURE_OPENAPI_CLIENT_ID: str
+    AZURE_TENANT_ID: str = Field(alias="AZURE-TENANT-ID")
+    AZURE_CLIENT_ID: str = Field(alias="AZURE-CLIENT-ID")
+    AZURE_OPENAPI_CLIENT_ID: str = Field(alias="AZURE-OPENAPI-CLIENT-ID")
     class Config:
         env_file = ".env"
 
@@ -22,6 +28,15 @@ azure_scheme = SingleTenantAzureAuthorizationCodeBearer(
     scopes={
         f"api://{settings.AZURE_CLIENT_ID}/hiltend-auth-access": "Access API as User"
     }
+)
+
+# Container App System Identity
+credential = DefaultAzureCredential() 
+
+# Data Lake Connection /w the URL and Identity
+service_client = DataLakeServiceClient(
+    account_url=settings.Field(alias="DATALAKE-ACCOUNT-URL"), 
+    credential=credential
 )
 
 @asynccontextmanager

@@ -1,0 +1,6 @@
+creds = Azure Portal -> Container Registry -> Access Keys 
+docker login [login server]
+~username
+~password
+docker build --platform linux/amd64 --provenance=false -t YOUR_REGISTRY_NAME.azurecr.io/[Image Name]:[version tag] .
+docker push YOUR_REGISTRY_NAME.azurecr.io/[Image Name]:[version tag]

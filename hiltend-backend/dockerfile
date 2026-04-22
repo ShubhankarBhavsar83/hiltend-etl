@@ -4,16 +4,21 @@ ARG PYTHON_VERSION=python:3.14
 FROM ${PYTHON_VERSION}-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
-
 WORKDIR /build
 
-RUN uv venv /opt/venv
+# RUN uv venv /opt/venv
 
-ENV PATH="/opt/venv/bin:$PATH"
+# ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements.txt .
+# COPY requirements.txt .
 
-RUN uv pip install --no-cache -r requirements.txt
+# RUN uv pip install --no-cache -r requirements.txt
+#----
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+
+COPY pyproject.toml uv.lock ./
+
+RUN uv sync --no-dev --no-install-project
 
 
 # Runtime Stage
