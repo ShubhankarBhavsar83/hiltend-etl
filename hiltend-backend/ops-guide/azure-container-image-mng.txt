@@ -4,3 +4,7 @@ docker login [login server]
 ~password
 docker build --platform linux/amd64 --provenance=false -t YOUR_REGISTRY_NAME.azurecr.io/[Image Name]:[version tag] .
 docker push YOUR_REGISTRY_NAME.azurecr.io/[Image Name]:[version tag]
+
+
+docker build --platform linux/amd64 --provenance=false -t hiltendregistry.azurecr.io/hiltend-backend:<version> .
+docker push hiltendregistry.azurecr.io/hiltend-backend:<version>

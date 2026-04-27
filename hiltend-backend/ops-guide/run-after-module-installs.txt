@@ -1,0 +1,11 @@
+------------> <no longer needed> <--------------
+
+uv pip compile pyproject.toml -o requirements.txt
+
+-> add modules to requirements for docker
+
+
+-------------> <Updated Method> <-----------------
+
+uv lock
+uv sync

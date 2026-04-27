@@ -23,11 +23,12 @@ function App() {
             });
             console.log("2- Token Acquired...");
 
-            const res = await fetch("http://localhost:8000/secure", {
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/secure`, {
                 headers: {
                     Authorization: `Bearer ${response.accessToken}`
                 }
             });
+            console.log("3- Fetch Done")
 
             const data = await res.json();
             setApiResponse(JSON.stringify(data, null, 2));

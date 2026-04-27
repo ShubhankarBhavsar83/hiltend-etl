@@ -3,11 +3,21 @@ name = "hiltend-backend"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "azure-identity>=1.25.3",
+    "azure-storage-blob>=12.28.0",
     "azure-storage-file-datalake>=12.23.0",
-    "fastapi[standard]>=0.136.0",
+    "cffi<1.17.1",
+    "fastapi-azure-auth>=5.2.0",
+    "fastapi>=0.136.0",
+    "httptools>=0.7.1",
+    "pydantic>=2.13.3",
+    "pydantic-settings>=2.14.0",
     "pyodbc>=5.3.0",
+    "python-dotenv>=1.2.2",
     "sqlalchemy>=2.0.49",
+    "starlette>=1.0.0",
+    "uvicorn>=0.46.0",
+    "watchdog>=6.0.0",
 ]

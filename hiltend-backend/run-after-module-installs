@@ -1,4 +1,0 @@
-uv pip compile pyproject.toml -o requirements.txt
-
-
-#add modules to requirements for docker

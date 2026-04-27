@@ -3,23 +3,40 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_azure_auth import SingleTenantAzureAuthorizationCodeBearer
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from azure.identity import DefaultAzureCredential
 from azure.storage.filedatalake import DataLakeServiceClient
 
 
 
-
-
 class Settings(BaseSettings):
+    # Map the hyphenated .env names to Python-friendly underscore names
     AZURE_TENANT_ID: str = Field(alias="AZURE-TENANT-ID")
     AZURE_CLIENT_ID: str = Field(alias="AZURE-CLIENT-ID")
     AZURE_OPENAPI_CLIENT_ID: str = Field(alias="AZURE-OPENAPI-CLIENT-ID")
-    class Config:
-        env_file = ".env"
+    DATALAKE_ACCOUNT_URL: str = Field(alias="DATALAKE-ACCOUNT-URL")
+    DATALAKE_CONTAINER_NAME: str = Field(alias="DATALAKE-CONTAINER-NAME")
+
+    # This tells Pydantic to ignore all the extra Windows/Cortex variables
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+        populate_by_name=True,
+        env_ignore_empty=True
+    )
 
 settings = Settings()
+
+# Azure Identity (Managed Identity in Cloud, ENV variables locally)
+credential = DefaultAzureCredential() 
+
+# Corrected DataLake Connection
+datalake_client = DataLakeServiceClient(
+    account_url=settings.DATALAKE_ACCOUNT_URL, 
+    credential=credential
+)
+
 
 azure_scheme = SingleTenantAzureAuthorizationCodeBearer(
     app_client_id=settings.AZURE_CLIENT_ID,
@@ -31,13 +48,13 @@ azure_scheme = SingleTenantAzureAuthorizationCodeBearer(
 )
 
 # Container App System Identity
-credential = DefaultAzureCredential() 
+# credential = DefaultAzureCredential() 
 
-# Data Lake Connection /w the URL and Identity
-service_client = DataLakeServiceClient(
-    account_url=settings.Field(alias="DATALAKE-ACCOUNT-URL"), 
-    credential=credential
-)
+# # Data Lake Connection /w the URL and Identity
+# datalake_client = DataLakeServiceClient(
+#     account_url=settings.Field(alias="DATALAKE-ACCOUNT-URL"), 
+#     credential=credential
+# )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -60,7 +77,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
 # Routes
@@ -71,3 +88,14 @@ async def public_route():
 @app.get("/secure", dependencies=[Security(azure_scheme)])
 async def secure_route():
     return {"message": "valid id"}
+
+
+@app.get("/test-datalake", dependencies=[Security(azure_scheme)])
+async def test_datalake():
+    try:
+        file_system_client = datalake_client.get_file_system_client(file_system=settings.DATALAKE_CONTAINER_NAME)
+        
+        paths = file_system_client.get_paths()
+        return {"message": "Connected to Datalake", "files": [p.name for p in paths]}
+    except Exception as e:
+        return {"error": str(e)}
