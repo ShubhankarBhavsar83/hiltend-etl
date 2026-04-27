@@ -81,6 +81,10 @@ app.add_middleware(
 )
 
 # Routes
+@app.get("/")
+async def public_route():
+    return {"message": "home"}
+
 @app.get("/public")
 async def public_route():
     return {"message": "unrestricted"}
