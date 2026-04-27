@@ -32,6 +32,12 @@ jobs:
           api_location: "" # Api source code path - optional
           output_location: "build" # Built app content directory - optional
           ###### End of Repository/Build Configurations ######
+        env:
+          VITE_AZURE_TENANT_ID="5d486d5d-6652-4319-a175-8de2b8760772"
+          VITE_AZURE_CLIENT_ID="08f831e1-2066-46be-bad7-0fcafe37b77a"
+          VITE_BACKEND_CLIENT_ID="166fc226-2c67-4d25-8e77-224eb2d40531"
+          VITE_API_BASE_URL="https://hiltend-backend-container.politegrass-fac01ed2.centralindia.azurecontainerapps.io"
+
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
