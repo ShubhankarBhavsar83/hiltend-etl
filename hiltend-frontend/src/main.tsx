@@ -6,6 +6,8 @@ import { PublicClientApplication } from '@azure/msal-browser'
 import { MsalProvider } from '@azure/msal-react'
 import {msalConfig} from "../authConfig"
 
+const root = document.getElementById('root');
+if (!root) throw new Error('No root element found');
 const msalInstance= new PublicClientApplication(msalConfig);
 
 msalInstance.initialize()
@@ -13,7 +15,7 @@ msalInstance.initialize()
         return msalInstance.handleRedirectPromise();
     })
     .then(() => {
-        createRoot(document.getElementById('root')!).render(
+        createRoot(root).render(
             <StrictMode>
                 <MsalProvider instance={msalInstance}>
                     <App />
