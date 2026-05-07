@@ -33,9 +33,9 @@ jobs:
           output_location: "dist" # Built app content directory - optional
           ###### End of Repository/Build Configurations ######
         env:
-          VITE_AZURE_TENANT_ID: "50219487-aa8e-4fe4-a40a-e49d0dff3c7e"
-          VITE_AZURE_CLIENT_ID: "b0499004-09bc-4c61-9ba2-53985b2bddd0"
-          VITE_BACKEND_CLIENT_ID: "0815be8d-ea26-41b8-8c79-5e35a30baf4d"
+          VITE_AZURE_TENANT_ID: ${{ vars.VITE_AZURE_TENANT_ID_GH }}
+          VITE_AZURE_CLIENT_ID: ${{ vars.VITE_AZURE_CLIENT_ID_GH }}
+          VITE_BACKEND_CLIENT_ID: ${{ vars.VITE_BACKEND_CLIENT_ID_GH }} 
           VITE_API_BASE_URL: "https://hiltend-container-backend.wonderfulcliff-03d5f7bc.southindia.azurecontainerapps.io"
 
   close_pull_request_job:
