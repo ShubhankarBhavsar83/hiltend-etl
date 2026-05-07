@@ -1,5 +1,5 @@
 import { useMsal, AuthenticatedTemplate, UnauthenticatedTemplate } from "@azure/msal-react";
-import { loginRequest } from "../authConfig";
+import { loginRequest } from "./util/authConfig";
 import { useState } from "react";
 
 function App() {
