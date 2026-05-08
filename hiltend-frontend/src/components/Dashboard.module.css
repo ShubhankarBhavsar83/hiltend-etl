@@ -1,0 +1,66 @@
+/* Dashboard.module.css */
+
+.root {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--gray-50);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Page header ────────────────────────────────────────────────────────── */
+.pageHeader {
+  padding: var(--space-8) var(--space-10) var(--space-6);
+  border-bottom: 1px solid var(--gray-200);
+  background: var(--white);
+  flex-shrink: 0;
+}
+
+.pageTitle {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--gray-900);
+  margin-bottom: var(--space-1);
+}
+
+.pageSubtitle {
+  font-size: 13px;
+  color: var(--gray-500, var(--gray-400));
+}
+
+/* ── Content ────────────────────────────────────────────────────────────── */
+.content {
+  flex: 1;
+  padding: var(--space-8) var(--space-10);
+}
+
+/* ── Placeholder ────────────────────────────────────────────────────────── */
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  border: 1.5px dashed var(--gray-200);
+  border-radius: var(--radius-lg);
+  color: var(--gray-400);
+  font-size: 13.5px;
+  font-family: var(--font-mono);
+  background: var(--white);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .pageHeader {
+    padding: var(--space-5) var(--space-5) var(--space-4);
+  }
+  .content {
+    padding: var(--space-5);
+  }
+}
