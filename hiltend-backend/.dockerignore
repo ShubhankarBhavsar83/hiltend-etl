@@ -1,5 +1,6 @@
 
 hiltend-backend/ops-guide
+hiltend-backend/data
 
 # Virtual Environments (CRITICAL)
 .venv/
