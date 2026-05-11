@@ -1,10 +1,13 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-// import './index.css'
+import "./styles/global.css"; 
+import "./index.css";
 import App from './App.tsx'
 import { PublicClientApplication } from '@azure/msal-browser'
 import { MsalProvider } from '@azure/msal-react'
 import {msalConfig} from "./util/authConfig.ts"
+
+
 
 const root = document.getElementById('root');
 if (!root) throw new Error('No root element found');

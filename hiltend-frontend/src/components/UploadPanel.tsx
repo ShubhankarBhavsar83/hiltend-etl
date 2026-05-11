@@ -1,7 +1,12 @@
 import { useState, useRef, useCallback } from "react";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "../util/authConfig";
-import styles from "./UploadPanel.module.css";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type UploadStatus = "idle" | "uploading" | "success" | "error";
@@ -114,26 +119,28 @@ export default function UploadPanel() {
   const canSubmit = !!file && !!datasetName.trim() && status !== "uploading";
 
   return (
-    <div className={styles.panel}>
+    <div className="flex flex-col gap-8 max-w-160">
       {/* Header */}
-      <div className={styles.panelHeader}>
-        <h2 className={styles.panelTitle}>Ingest Dataset</h2>
-        <p className={styles.panelDesc}>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-xl font-semibold tracking-tight text-gray-900">
+          Ingest Dataset
+        </h2>
+        <p className="text-[13.5px] text-gray-500 leading-relaxed">
           Upload a CSV to stage it in the bronze layer and trigger the PySpark
           transformation pipeline.
         </p>
       </div>
 
       {/* Form */}
-      <div className={styles.form}>
+      <div className="bg-white border border-gray-200 rounded-xl p-6 flex flex-col gap-5 shadow-sm">
         {/* Dataset name */}
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="dataset-name">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="dataset-name" className="text-[12.5px] font-semibold text-gray-700 tracking-[0.01em]">
             Dataset name
-          </label>
-          <input
+          </Label>
+          <Input
             id="dataset-name"
-            className={styles.input}
+            className="font-mono text-[13.5px] h-9"
             type="text"
             placeholder="e.g. sales_q3_2026"
             value={datasetName}
@@ -142,20 +149,23 @@ export default function UploadPanel() {
             autoComplete="off"
             spellCheck={false}
           />
-          <span className={styles.hint}>
+          <span className="text-xs text-gray-400 font-mono">
             Used to prefix the staged file. Letters, numbers and underscores recommended.
           </span>
         </div>
 
         {/* File drop zone */}
-        <div className={styles.field}>
-          <label className={styles.label}>CSV file</label>
+        <div className="flex flex-col gap-2">
+          <Label className="text-[12.5px] font-semibold text-gray-700 tracking-[0.01em]">
+            CSV file
+          </Label>
           <div
-            className={[
-              styles.dropZone,
-              isDragging ? styles.dragging : "",
-              file ? styles.hasFile : "",
-            ].join(" ")}
+            className={cn(
+              "border-[1.5px] border-dashed border-gray-200 rounded-lg px-6 py-8 flex items-center justify-center cursor-pointer transition-colors bg-gray-50",
+              "hover:border-blue-500 hover:bg-blue-50",
+              isDragging && "border-blue-600 bg-blue-50",
+              file && "border-solid border-blue-500 bg-blue-50 cursor-default py-4 px-5"
+            )}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
@@ -169,73 +179,82 @@ export default function UploadPanel() {
               ref={fileInputRef}
               type="file"
               accept=".csv"
-              className={styles.hiddenInput}
+              className="hidden"
               onChange={handleFileInput}
             />
 
             {file ? (
-              <div className={styles.fileRow}>
+              <div className="flex items-center gap-3 w-full text-blue-700">
                 <FileIcon />
-                <div className={styles.fileMeta}>
-                  <span className={styles.fileName}>{file.name}</span>
-                  <span className={styles.fileSize}>{formatBytes(file.size)}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="block text-[13.5px] font-medium text-gray-900 truncate">
+                    {file.name}
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">{formatBytes(file.size)}</span>
                 </div>
-                <button className={styles.clearBtn} onClick={clearFile} aria-label="Remove file">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 h-7 w-7 text-gray-400 hover:text-red-500 hover:bg-transparent"
+                  onClick={clearFile}
+                  aria-label="Remove file"
+                >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <line x1="18" y1="6" x2="6" y2="18" />
                     <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
-                </button>
+                </Button>
               </div>
             ) : (
-              <div className={styles.dropHint}>
+              <div className="flex flex-col items-center gap-3 text-gray-400 text-center">
                 <UploadIcon />
-                <span>
+                <span className="text-[13.5px] text-gray-600">
                   Drag & drop a CSV here, or{" "}
-                  <span className={styles.browseLink}>browse</span>
+                  <span className="text-blue-600 font-medium underline underline-offset-2">
+                    browse
+                  </span>
                 </span>
-                <span className={styles.dropSub}>CSV only · Max 50 MB</span>
+                <span className="text-xs text-gray-400 font-mono">CSV only · Max 50 MB</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Feedback */}
+        {/* Error alert */}
         {errorMsg && (
-          <div className={styles.alert} data-type="error" role="alert">
+          <Alert variant="destructive" role="alert">
             <ErrorIcon />
-            {errorMsg}
-          </div>
+            <AlertDescription>{errorMsg}</AlertDescription>
+          </Alert>
         )}
 
+        {/* Success alert */}
         {status === "success" && result && (
-          <div className={styles.alert} data-type="success" role="status">
+          <Alert className="border-green-200 bg-green-50 text-green-800" role="status">
             <SuccessIcon />
-            <div>
-              <strong>{result.message}</strong>
-              <span className={styles.resultMeta}>
-                File ID: <code>{result.file_id}</code>
-                {result.adls_uploaded && " · Uploaded to ADLS"}
-              </span>
-            </div>
-          </div>
+            <AlertTitle className="font-semibold mb-0.5">{result.message}</AlertTitle>
+            <AlertDescription className="text-xs opacity-80 font-mono">
+              File ID: <code>{result.file_id}</code>
+              {result.adls_uploaded && " · Uploaded to ADLS"}
+            </AlertDescription>
+          </Alert>
         )}
 
         {/* Submit */}
-        <button
-          className={styles.submitBtn}
+        <Button
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm h-10 gap-2"
           onClick={handleSubmit}
           disabled={!canSubmit}
         >
           {status === "uploading" ? (
             <>
-              <span className={styles.spinner} />
+              <Spinner />
               Uploading…
             </>
           ) : (
             "Ingest Dataset"
           )}
-        </button>
+        </Button>
       </div>
 
       {/* Pipeline steps */}
@@ -252,22 +271,34 @@ function PipelineSteps() {
     { n: "03", title: "Load", desc: "Clean data written to Azure SQL" },
   ];
   return (
-    <div className={styles.pipeline}>
+    <div className="flex items-stretch gap-2 flex-col sm:flex-row">
       {steps.map((s, i) => (
         <>
-          <div key={s.n} className={styles.pipelineStep}>
-            <span className={styles.stepNum}>{s.n}</span>
+          <div key={s.n} className="flex-1 bg-white border border-gray-200 rounded-lg p-4 flex gap-3 items-start shadow-sm">
+            <Badge variant="outline" className="font-mono text-[11px] font-medium text-blue-600 border-blue-200 bg-blue-50 px-1.5 py-0 mt-0.5 shrink-0">
+              {s.n}
+            </Badge>
             <div>
-              <strong>{s.title}</strong>
-              <span>{s.desc}</span>
+              <strong className="block text-[13px] font-semibold text-gray-900 mb-0.5">
+                {s.title}
+              </strong>
+              <span className="text-xs text-gray-500 leading-relaxed">{s.desc}</span>
             </div>
           </div>
           {i < steps.length - 1 && (
-            <div key={`arrow-${i}`} className={styles.pipelineArrow}>→</div>
+            <div key={`arrow-${i}`} className="text-gray-300 text-base flex items-center justify-center shrink-0 sm:rotate-0 rotate-90">
+              →
+            </div>
           )}
         </>
       ))}
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <div className="w-3.5 h-3.5 border-2 border-white/35 border-t-white rounded-full animate-spin" />
   );
 }
 

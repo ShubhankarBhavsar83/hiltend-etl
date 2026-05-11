@@ -3,7 +3,6 @@ import { loginRequest } from "./util/authConfig";
 import LoginPage from "./components/LoginPage";
 import Dashboard from "./components/Dashboard";
 
-import "./styles/global.css";
 
 export default function App() {
   const { instance } = useMsal();
