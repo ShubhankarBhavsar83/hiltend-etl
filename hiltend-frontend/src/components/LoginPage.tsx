@@ -11,10 +11,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     <div className="flex h-screen overflow-hidden">
       {/* Left panel — branding */}
       <div className="flex-1 bg-gray-900 text-white hidden md:flex items-center justify-center p-12">
-        <div className="max-w-150 flex flex-col gap-10">
+        {/* Swapped max-w-150 for max-w-md */}
+        <div className="max-w-md flex flex-col gap-10">
           {/* Logo */}
           <div className="flex items-center gap-2 text-lg font-semibold">
-            <span className="inline-flex items-center justify-center w-7.5 h-7.5 bg-blue-600 rounded-sm font-semibold text-[15px] text-white">
+            {/* Swapped w-7.5 h-7.5 for standard w-8 h-8 */}
+            <span className="inline-flex items-center justify-center w-8 h-8 bg-blue-600 rounded-sm font-semibold text-[15px] text-white">
               H
             </span>
             <span className="text-white/90 tracking-tight">iltend</span>
@@ -27,10 +29,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
               <br />
               simplified.
             </h1>
-            <p className="text-gray-400 text-sm leading-[1.7]">
-              Upload CSVs, trigger PySpark transformations, and land clean data
-              into Azure SQL — all from one place.
-            </p>
           </div>
 
           {/* Features */}
@@ -43,9 +41,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       </div>
 
       {/* Right panel — sign in */}
-      <div className="w-full md:w-110 shrink-0 flex items-center justify-center p-8 md:p-12 bg-white">
+      {/* Swapped w-110 for w-[28rem] to use arbitrary sizing safely */}
+      <div className="w-full md:w-[28rem] shrink-0 flex items-center justify-center p-8 md:p-12 bg-white">
         <Card className="w-full border-0 shadow-none">
-          <CardHeader className="p-0 pb-6 space-y-2">
+          {/* Swapped p-25 for p-6 */}
+          <CardHeader className="p-4 space-y-2">
             <h2 className="text-[22px] font-semibold tracking-tight text-gray-900">
               Sign in
             </h2>
@@ -54,7 +54,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             </p>
           </CardHeader>
 
-          <CardContent className="p-0 flex flex-col gap-6">
+          {/* Swapped p-25 for p-6, and flex-row for flex-col */}
+          <CardContent className="p-4 flex flex-col gap-6">
             <Button
               className="w-full bg-gray-900 hover:bg-gray-800 active:bg-gray-700 text-white font-medium text-sm h-10 gap-3"
               onClick={onLogin}
