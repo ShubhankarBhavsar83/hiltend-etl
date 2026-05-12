@@ -19,15 +19,13 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             <span className="inline-flex items-center justify-center w-8 h-8 bg-blue-600 rounded-sm font-semibold text-[15px] text-white">
               H
             </span>
-            <span className="text-white/90 tracking-tight">iltend</span>
+            <span className="text-white/90 tracking-tight">Hiltend</span>
           </div>
 
           {/* Headline */}
           <div className="flex flex-col gap-4">
             <h1 className="text-[32px] font-semibold leading-[1.15] tracking-tight text-white">
-              Data pipeline,
-              <br />
-              simplified.
+              Data pipeline, simplified.
             </h1>
           </div>
 
