@@ -6,20 +6,12 @@ FROM ${PYTHON_VERSION}-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 WORKDIR /build
 
-# RUN uv venv /opt/venv
-
-# ENV PATH="/opt/venv/bin:$PATH"
-
-# COPY requirements.txt .
-
-# RUN uv pip install --no-cache -r requirements.txt
 #----
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 
 COPY pyproject.toml uv.lock ./
 
 RUN uv sync --no-dev --no-install-project
-
 
 # Runtime Stage
 FROM ${PYTHON_VERSION}-slim
@@ -30,8 +22,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
-
-
 
 # Azure SQL Driver Dependencies 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -46,7 +36,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
 
 COPY --from=builder /opt/venv /opt/venv
 

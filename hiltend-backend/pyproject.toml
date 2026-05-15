@@ -24,4 +24,7 @@ dependencies = [
     "pyspark>=4.1.1",
     "azure-keyvault-secrets>=4.11.0",
     "gharchive>=0.2.2",
+    "azure-ai-inference>=1.0.0b9",
+    "openai>=2.36.0",
+    "databricks-sdk>=0.108.0",
 ]
