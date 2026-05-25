@@ -10,8 +10,6 @@ class Settings(BaseSettings):
 
     datalake_account_url: str = Field(alias="DATALAKE-ACCOUNT-URL")
     datalake_container_name: str = Field(alias="DATALAKE-CONTAINER-NAME")
-    datalake_connection_key: str = Field(alias="DATALAKE-CONNECTION-KEY")
-    datalake_account_name: str = Field(alias="DATALAKE-ACCOUNT-NAME")
 
     azure_ai_endpoint: str = Field(alias="AZURE-AI-ENDPOINT")
     azure_ai_key: str = Field(alias="AZURE-AI-KEY")
