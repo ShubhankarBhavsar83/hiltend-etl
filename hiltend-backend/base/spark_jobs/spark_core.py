@@ -18,12 +18,10 @@ def execute_tsql(jdbc_url, db_user, db_pass, query):
     Executes raw T-SQL using pure Python (pymssql).
     This bypasses the JVM restriction on Databricks Serverless compute.
     """
-    # Parse the JDBC URL to get the server and database for pymssql
-    # Example: "jdbc:sqlserver://server.database.windows.net:1433;database=mydb"
     clean_str = jdbc_url.replace("jdbc:sqlserver://", "")
     parts = clean_str.split(";")
     
-    server = parts[0].split(":")[0] # Extracts the domain
+    server = parts[0].split(":")[0] 
     database = ""
     for p in parts[1:]:
         if p.lower().startswith("database="):
@@ -43,13 +41,11 @@ def run_etl():
         sys.exit(1)
 
     file_path = sys.argv[1]
-    dataset_name = sys.argv[2]
+    dataset_name = sys.argv[2].strip().replace(" ", "_")
     ai_schema_map_str = sys.argv[3]
 
-    print(f"Starting ETL for {dataset_name} on file: {file_path}")
+    print(f"Starting ETL for Schema [{dataset_name}] on file: {file_path}")
 
-    # --- Configuration (Fetch these from Databricks Secrets in Production) ---
-    # Example format: "jdbc:sqlserver://<db-con-string>"
     jdbc_url = dbutils.secrets.get(scope="azure-sql", key="jdbc-url") 
     db_user = dbutils.secrets.get(scope="azure-sql", key="db-user")
     db_pass = dbutils.secrets.get(scope="azure-sql", key="db-password")
@@ -76,34 +72,29 @@ def run_etl():
     for dim_name, columns in dimensions.items():
         print(f"Processing Dimension: {dim_name}")
         
-        # Isolate the data and drop exact duplicates
         dim_df = df.select(*columns).distinct().dropna(how="all")
-        
-        # Assume the first column the AI provided is the Primary Key
         primary_key = columns[0]
-        stg_table_name = f"stg_{dim_name}"
-        real_table_name = f"dbo.{dim_name}"
+        
+        stg_table_name = f"[{dataset_name}].[stg_{dim_name}]"
+        real_table_name = f"[{dataset_name}].[{dim_name}]"
 
-        # 1. Write to temporary Staging Table
         dim_df.write.jdbc(url=jdbc_url, table=stg_table_name, mode="overwrite", properties=jdbc_props)
 
-        # 2. Construct the safe UPSERT (MERGE) Query
-        update_set = ", ".join([f"target.{col} = source.{col}" for col in columns if col != primary_key])
-        insert_cols = ", ".join(columns)
-        insert_vals = ", ".join([f"source.{col}" for col in columns])
+        update_set = ", ".join([f"target.[{col}] = source.[{col}]" for col in columns if col != primary_key])
+        insert_cols = ", ".join([f"[{col}]" for col in columns])
+        insert_vals = ", ".join([f"source.[{col}]" for col in columns])
 
         merge_query = f"""
         MERGE INTO {real_table_name} AS target
         USING {stg_table_name} AS source
-        ON target.{primary_key} = source.{primary_key}
+        ON target.[{primary_key}] = source.[{primary_key}]
         """
         
-        if update_set: # If there are columns to update
+        if update_set:
             merge_query += f" WHEN MATCHED THEN UPDATE SET {update_set}"
             
         merge_query += f" WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals});"
 
-        # 3. Execute MERGE and clean up Staging
         execute_tsql(jdbc_url, db_user, db_pass, merge_query)
         execute_tsql(jdbc_url, db_user, db_pass, f"DROP TABLE {stg_table_name};")
         
@@ -114,17 +105,13 @@ def run_etl():
     # ==========================================
     print(f"Processing Fact Table...")
     
-    # Isolate fact columns
     fact_df = df.select(*fact_columns)
-    
-    # Because dimensions are already merged and primary keys exist, 
-    # we can safely append the facts without violating Foreign Keys!
-    fact_table_name = "dbo.Fact_Events"
+    fact_table_name = f"[{dataset_name}].[Fact_Events]"
     
     fact_df.write.jdbc(
         url=jdbc_url, 
         table=fact_table_name, 
-        mode="append", # Always append facts
+        mode="append", 
         properties=jdbc_props
     )
 

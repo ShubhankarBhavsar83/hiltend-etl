@@ -1,11 +1,21 @@
 import json
 from databricks.sdk import WorkspaceClient
-from azure.identity import DefaultAzureCredential
+from azure.identity import ClientSecretCredential, DefaultAzureCredential
 from base.core.config import settings
 
+
 def _get_workspace_client() -> WorkspaceClient:
-    """Helper method to authenticate Databricks natively via Azure Managed Identity."""
-    credential = DefaultAzureCredential()
+    """Helper method to authenticate Databricks natively."""
+    if settings.environment == "cloud":
+        credential = DefaultAzureCredential()
+    else:
+        print("[Auth] Using ClientSecretCredential for local Databricks connection.")
+        credential = ClientSecretCredential(
+            tenant_id=settings.azure_tenant_id,
+            client_id=settings.azure_client_id,
+            client_secret=settings.client_secret
+        )
+        
     token = credential.get_token("2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default").token
     
     return WorkspaceClient(
@@ -13,16 +23,15 @@ def _get_workspace_client() -> WorkspaceClient:
         token=token
     )
 
-def extract_headers_via_databricks(file_path: str) -> list[str]:
+def extract_headers_via_databricks(file_path: str) -> bool:
     """
     JOB 1: Triggers a lightweight Databricks job to read CSV headers,
-    waits for it to complete, and retrieves the result via Task Values.
+    waits for it to complete.
     """
     print(f"[Orchestrator] Triggering Header Extraction (Job 1) for: {file_path}")
     w = _get_workspace_client()
 
     try:
-        # starrt job
         run_waiter = w.jobs.run_now(
             job_id=int(settings.databricks_job_1_id),
             job_parameters={"file_path": file_path}
@@ -30,23 +39,13 @@ def extract_headers_via_databricks(file_path: str) -> list[str]:
         
         print(f"[Orchestrator] Job 1 Started (Run ID: {run_waiter.bind()['run_id']}). process running..")
         
-        # wait for backgroundtask to finish
         run_info = run_waiter.result() 
         
         if run_info.state.life_cycle_state.value != "TERMINATED" or run_info.state.result_state.value != "SUCCESS":
             raise Exception(f"Databricks Job 1 failed. State: {run_info.state.result_state}")
 
-        # get task value from pyspark script
-        # assumed databricks task name -> "extract_headers"
-        task_run_id = run_info.tasks[0].run_id
-        task_output = w.jobs.get_run_output(task_run_id)
-        
-        # extract JSON string from databricks
-        headers_json_str = task_output.task_values["csv_headers"]
-        headers = json.loads(headers_json_str)
-        
-        print(f"[Orchestrator] Job 1 Success. Extracted {len(headers)} headers.")
-        return headers
+        print(f"[Orchestrator] Job 1 Success. Headers dropped in ADLS.")
+        return True
 
     except Exception as e:
         print(f"[Orchestrator] Job 1 Failed: {str(e)}")

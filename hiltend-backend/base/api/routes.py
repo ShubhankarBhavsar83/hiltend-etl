@@ -2,12 +2,15 @@ import os
 import uuid
 import shutil
 from fastapi import APIRouter, Depends, Security, UploadFile, Form, File, BackgroundTasks, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 from base.core.security import azure_scheme
 from base.core.config import settings
+from base.database.session import get_db
 
 # --- Services ---
 from base.services.orchestrator import extract_headers_via_databricks, trigger_spark_etl
-from base.services.storage import upload_to_adls
+from base.services.storage import upload_to_adls, download_headers_from_adls
 from base.services.llmService import LLMService
 
 router = APIRouter()
@@ -15,100 +18,102 @@ router = APIRouter()
 RAW_DATA = "./data/bronze"
 os.makedirs(RAW_DATA, exist_ok=True)
 
-# Instantiate the AI Service once
 ai_service = LLMService()
 
-def process_pipeline_background(local_path: str, safe_name: str, dataset_name: str):
-    """
-    The Master Orchestrator (Strict Databricks Approach):
-    1. Uploads to ADLS
-    2. Triggers Databricks Job 1 (Extract Headers) & Waits for response
-    3. Asks Azure AI Foundry for a Relational Map
-    4. Triggers Databricks Job 2 (ETL, Validation, & SQL Persistence)
-    """
+# --- In-Memory Status DB for Testing the UI Progress Bar ---
+PIPELINE_STATUS = {}
+
+def process_pipeline_background(local_path: str, safe_name: str, dataset_name: str, file_id: str):
+    """Executes the pipeline and updates the status dictionary for the UI."""
     try:
-        # STEP 1: Upload to ADLS
-        if settings.environment == "cloud":
-            adls_path = upload_to_adls(local_path, safe_name)
-            if not adls_path:
-                raise Exception("ADLS upload returned empty path.")
-            target_path = adls_path
-        else:
-            print(f"[Ingest] Local env — skipping ADLS upload for {safe_name}.")
-            target_path = local_path
-
-        # STEP 2: Databricks Job 1 (Header Extraction)
-        print("[Orchestrator] Triggering Databricks to extract headers...")
-        # Note: This orchestrator method must wait for the job to complete and fetch the result
-        headers = extract_headers_via_databricks(target_path)
-        print(f"[Orchestrator] Received headers from Databricks: {headers}")
+        # STEP 1: ALWAYS Stage to ADLS (Databricks needs a cloud path)
+        PIPELINE_STATUS[file_id] = {"step": "staging", "message": "Uploading to ADLS Bronze Layer..."}
         
-        # STEP 3: Azure AI Foundry Schema Mapping
-        print("[Orchestrator] Requesting Star Schema mapping from Llama 3.3 70B...")
-        schema_map = ai_service.generate_relational_mapping(
-            dataset_name=dataset_name, 
-            headers=headers
-        )
-        schema_map_json = schema_map.model_dump_json()
-        print(f"[Orchestrator] AI Mapping Complete.")
+        target_path = upload_to_adls(local_path, safe_name)
+        
+        if not target_path:
+            raise Exception("ADLS upload failed, returned empty path.")
 
-        # STEP 4: Databricks Job 2 (Full ETL Pipeline)
-        print("[Orchestrator] Triggering Databricks ETL Job (Write to Azure SQL)...")
-        trigger_spark_etl(
-            file_path=target_path, 
-            dataset_name=dataset_name,
-            ai_schema_map=schema_map_json
-        )
+        # STEP 2: Databricks Job 1 (Extract)
+        PIPELINE_STATUS[file_id] = {"step": "extracting", "message": "Spinning up Databricks Serverless for Header Extraction..."}
+        extract_headers_via_databricks(target_path)
+        
+        # STEP 2.5: Retrieve the dropped file from the Data Lake
+        headers = download_headers_from_adls(safe_name)
+        
+        # STEP 3: Azure AI Mapping
+        PIPELINE_STATUS[file_id] = {"step": "ai_mapping", "message": "Azure AI Foundry is designing the Star Schema..."}
+        schema_map = ai_service.generate_relational_mapping(dataset_name, headers)
+        schema_map_json = schema_map.model_dump_json()
+
+        # STEP 4: Databricks Job 2 (ETL)
+        PIPELINE_STATUS[file_id] = {"step": "etl_running", "message": "Triggering Databricks ETL & Azure SQL Merge..."}
+        run_id = trigger_spark_etl(target_path, dataset_name, schema_map_json)
+        
+        # Final Success State
+        PIPELINE_STATUS[file_id] = {"step": "completed", "message": f"Pipeline successful! Job ID: {run_id}"}
 
     except Exception as e:
-        print(f"[Orchestrator] Pipeline failed: {str(e)}")
-        # Production TODO: Update database state to "Failed" so UI reflects the error
+        PIPELINE_STATUS[file_id] = {"step": "error", "message": f"Pipeline failed: {str(e)}"}
 
     finally:
-        # STEP 5: Cleanup Ephemeral Storage
-        if settings.environment == "cloud" and os.path.exists(local_path):
+        # Clean up the local ephemeral file to save space on your laptop/container
+        if os.path.exists(local_path):
             os.remove(local_path)
-            print(f"[Cleanup] Removed ephemeral file: {local_path}")
+
+# --- Dataset Management Endpoints ---
+from pydantic import BaseModel
+class DatasetCreate(BaseModel):
+    name: str
+
+@router.get("/api/v1/datasets", dependencies=[Security(azure_scheme)])
+def get_datasets(db: Session = Depends(get_db)):
+    """Fetches all custom schemas from Azure SQL."""
+    query = text("""
+        SELECT schema_name FROM information_schema.schemata 
+        WHERE schema_name NOT IN ('dbo', 'guest', 'sys', 'INFORMATION_SCHEMA', 'db_owner', 'db_accessadmin', 'db_securityadmin', 'db_ddladmin', 'db_backupoperator', 'db_datareader', 'db_datawriter', 'db_denydatareader', 'db_denydatawriter')
+    """)
+    result = db.execute(query).fetchall()
+    return {"datasets": [row[0] for row in result]}
+
+@router.post("/api/v1/datasets", dependencies=[Security(azure_scheme)])
+def create_dataset(payload: DatasetCreate, db: Session = Depends(get_db)):
+    """Creates a new SQL Schema to isolate the dataset."""
+    schema_name = payload.name.strip().replace(" ", "_")
+    try:
+        db.execute(text(f"CREATE SCHEMA [{schema_name}]"))
+        db.commit()
+        return {"status": "success", "dataset": schema_name}
+    except Exception:
+        db.rollback()
+        return {"status": "success", "dataset": schema_name, "message": "Dataset already exists"}
 
 
-@router.post(
-    "/api/v1/ingest",
-    dependencies=[Security(azure_scheme)],
-    summary="Ingest a CSV file, map schema via AI, and load to Azure SQL",
-)
+# --- Ingestion & Status Endpoints ---
+@router.post("/api/v1/ingest", dependencies=[Security(azure_scheme)])
 async def ingest_file(
     background_tasks: BackgroundTasks,
-    dataset_name: str = Form(..., description="Logical name for this dataset"),
-    file: UploadFile = File(..., description="The CSV file to ingest"),
+    dataset_name: str = Form(...),
+    file: UploadFile = File(...)
 ):
-    """
-    Validates input, stages the file locally, and hands off to the background orchestrator.
-    """
-    if not file.filename or not file.filename.endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only .csv files are supported.")
-
-    if not dataset_name.strip():
-        raise HTTPException(status_code=422, detail="dataset_name must not be empty.")
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only .csv files supported.")
 
     file_id = str(uuid.uuid4())[:8]
     safe_name = f"{dataset_name.strip()}_{file_id}.csv"
     local_path = os.path.join(RAW_DATA, safe_name)
 
-    try:
-        with open(local_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to stage file: {exc}") from exc
+    with open(local_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    PIPELINE_STATUS[file_id] = {"step": "queued", "message": "Pipeline queued..."}
 
     background_tasks.add_task(
-        process_pipeline_background, 
-        local_path=local_path, 
-        safe_name=safe_name, 
-        dataset_name=dataset_name.strip()
+        process_pipeline_background, local_path, safe_name, dataset_name.strip(), file_id
     )
 
-    return {
-        "status": "Accepted",
-        "message": f"File received. Databricks ingestion and AI pipeline initiated for dataset: {dataset_name}",
-        "file_id": file_id
-    }
+    return {"status": "Accepted", "file_id": file_id}
+
+@router.get("/api/v1/status/{file_id}", dependencies=[Security(azure_scheme)])
+def get_status(file_id: str):
+    return PIPELINE_STATUS.get(file_id, {"step": "unknown", "message": "Status not found."})

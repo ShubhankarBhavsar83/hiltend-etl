@@ -1,16 +1,40 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMsal } from "@azure/msal-react";
 import Sidebar, { type NavItem } from "./Sidebar";
 import UploadPanel from "./UploadPanel";
+import { loginRequest } from "../util/authConfig";
 
 interface DashboardProps {
   onLogout: () => void;
 }
 
 export default function Dashboard({ onLogout }: DashboardProps) {
-  const { accounts } = useMsal();
+  const { instance, accounts } = useMsal();
   const account = accounts[0];
   const [activeNav, setActiveNav] = useState<NavItem>("ingest");
+  
+  // Global Dataset State
+  const [datasets, setDatasets] = useState<string[]>([]);
+  const [selectedDataset, setSelectedDataset] = useState<string>("");
+
+  useEffect(() => {
+    const fetchDatasets = async () => {
+      try {
+        const token = await instance.acquireTokenSilent({ ...loginRequest, account });
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/datasets`, {
+          headers: { Authorization: `Bearer ${token.accessToken}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setDatasets(data.datasets);
+          if (data.datasets.length > 0) setSelectedDataset(data.datasets[0]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch datasets", err);
+      }
+    };
+    fetchDatasets();
+  }, [instance, account]);
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -22,7 +46,6 @@ export default function Dashboard({ onLogout }: DashboardProps) {
       />
 
       <main className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
-        {/* Page header */}
         <div className="px-10 pt-8 pb-6 border-b border-gray-200 bg-white shrink-0 md:px-10 md:pt-8">
           <h1 className="text-lg font-semibold tracking-tight text-gray-900 mb-1">
             {PAGE_TITLES[activeNav]}
@@ -30,9 +53,15 @@ export default function Dashboard({ onLogout }: DashboardProps) {
           <p className="text-[13px] text-gray-500">{PAGE_SUBTITLES[activeNav]}</p>
         </div>
 
-        {/* Content */}
         <div className="flex-1 md:p-10 p-5">
-          {activeNav === "ingest" && <UploadPanel />}
+          {activeNav === "ingest" && (
+            <UploadPanel 
+              datasets={datasets} 
+              setDatasets={setDatasets} 
+              selectedDataset={selectedDataset} 
+              setSelectedDataset={setSelectedDataset} 
+            />
+          )}
           {activeNav === "datasets" && <Placeholder label="Datasets" />}
           {activeNav === "analytics" && <Placeholder label="Analytics" />}
         </div>
