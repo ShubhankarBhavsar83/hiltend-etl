@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     azure_key_vault_url: str | None = Field(alias="AZURE-KEY-VAULT-URL", default=None)
     client_secret: str = Field(alias="AZURE-CLIENT-SECRET", default="")
 
+    azure_sql_admin: str = Field(alias="AZURE-SQL-ADMIN")
+    azure_sql_admin_password: str = Field(alias="AZURE-SQL-ADMIN-PASSWORD")
+    azure_sql_server_url: str = Field(alias="AZURE-SQL-SERVER-URL")
+    azure_sql_server_db: str = Field(alias="AZURE-SQL-SERVER-DB")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",

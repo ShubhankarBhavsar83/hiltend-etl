@@ -46,7 +46,7 @@ def download_headers_from_adls(remote_filename: str) -> list:
     Reaches into ADLS, downloads the dropped JSON file, 
     and returns the headers as a Python list.
     """
-    # Match the naming convention we just created in Databricks
+    # matching naming convention in databricks
     headers_filename = remote_filename.replace(".csv", "_headers.json")
     
     container = datalake_client.get_file_system_client(
@@ -54,7 +54,6 @@ def download_headers_from_adls(remote_filename: str) -> list:
     )
     file_client = container.get_file_client(headers_filename)
     
-    # Read the file contents directly into memory
     downloaded_bytes = file_client.download_file().readall()
     headers_json_str = downloaded_bytes.decode('utf-8')
     

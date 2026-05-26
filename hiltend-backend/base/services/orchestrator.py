@@ -6,15 +6,13 @@ from base.core.config import settings
 
 def _get_workspace_client() -> WorkspaceClient:
     """Helper method to authenticate Databricks natively."""
-    if settings.environment == "cloud":
-        credential = DefaultAzureCredential()
-    else:
-        print("[Auth] Using ClientSecretCredential for local Databricks connection.")
-        credential = ClientSecretCredential(
-            tenant_id=settings.azure_tenant_id,
-            client_id=settings.azure_client_id,
-            client_secret=settings.client_secret
-        )
+
+    print("[Auth] Using ClientSecretCredential for local Databricks connection.")
+    credential = ClientSecretCredential(
+        tenant_id=settings.azure_tenant_id,
+        client_id=settings.azure_client_id,
+        client_secret=settings.client_secret
+    )
         
     token = credential.get_token("2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default").token
     
@@ -65,7 +63,10 @@ def trigger_spark_etl(file_path: str, dataset_name: str, ai_schema_map: str):
             job_parameters={
                 "file_path": file_path,
                 "dataset_name": dataset_name,
-                "ai_schema_map": ai_schema_map
+                "ai_schema_map": ai_schema_map,
+                "jdbc_url": f"jdbc:sqlserver://{settings.azure_sql_server_url}:1433;database={settings.azure_sql_server_db}",
+                "db_user": settings.azure_sql_admin,
+                "db_pass": settings.azure_sql_admin_password
             }
         )
         
