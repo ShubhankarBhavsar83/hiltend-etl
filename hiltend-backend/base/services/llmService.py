@@ -69,7 +69,6 @@ class LLMService:
         """
         JOB 1: Takes CSV headers and returns a strict JSON Star Schema map.
         """
-        # We now give the AI a strict, literal template to copy.
         system_prompt = f"""
         You are an expert Data Architect. The user is uploading a new CSV dataset named '{dataset_name}'.
         Group the provided column headers into a logical Star Schema.

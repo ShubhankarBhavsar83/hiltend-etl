@@ -2,6 +2,9 @@ import json
 from databricks.sdk import WorkspaceClient
 from azure.identity import ClientSecretCredential, DefaultAzureCredential
 from base.core.config import settings
+from sqlalchemy import text
+import time
+from base.database.session import engine
 
 
 def _get_workspace_client() -> WorkspaceClient:
@@ -51,13 +54,13 @@ def extract_headers_via_databricks(file_path: str) -> bool:
 
 def trigger_spark_etl(file_path: str, dataset_name: str, ai_schema_map: str):
     """
-    JOB 2: Triggers the heavy ETL and SQL Persistence job. 
-    Does NOT wait for completion (Fire-and-Forget).
+    Triggers Databricks to stage data, then FastAPI runs the MERGE.
     """
-    print(f"[Orchestrator] Triggering ETL (Job 2) for dataset: {dataset_name}")
+    print(f"[Orchestrator] Triggering ETL for dataset: {dataset_name}")
     w = _get_workspace_client()
 
     try:
+        # 1. Trigger Databricks Job
         response = w.jobs.run_now(
             job_id=int(settings.databricks_job_2_id),
             job_parameters={
@@ -69,11 +72,86 @@ def trigger_spark_etl(file_path: str, dataset_name: str, ai_schema_map: str):
                 "db_pass": settings.azure_sql_admin_password
             }
         )
-        
         run_id = response.bind()['run_id']
-        print(f"[Orchestrator] Job 2 Success! Background ETL running on Databricks with Run ID: {run_id}")
-        return run_id
+        print(f"[Orchestrator] Databricks Job running (Run ID: {run_id}). Waiting for staging...")
+
+        # 2. Wait for Databricks to finish
+        while True:
+            run_info = w.jobs.get_run(run_id)
+            state = run_info.state.life_cycle_state
+            
+            if state in ['TERMINATED', 'SKIPPED', 'INTERNAL_ERROR']:
+                if run_info.state.result_state == 'SUCCESS':
+                    print("[Orchestrator] Databricks staging complete!")
+                    break
+                else:
+                    raise Exception(f"Databricks Job Failed: {run_info.state.state_message}")
+            
+            time.sleep(10) # Poll every 10 seconds
+
+        # 3. FASTAPI EXECUTES THE MERGE!
+        print("[Orchestrator] Executing T-SQL MERGE via FastAPI...")
+        schema_map = json.loads(ai_schema_map)
+        dimensions = schema_map.get("dimensions", {})
+
+        with engine.connect() as conn:
+            # Ensure the Azure SQL Schema exists
+            conn.execute(text(f"IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{dataset_name}') EXEC('CREATE SCHEMA [{dataset_name}]');"))
+            
+            for dim_name in dimensions.keys():
+                real_table = f"[{dataset_name}].[{dim_name}]"
+                stg_table = f"[{dataset_name}].[stg_{dim_name}]"
+
+                # --- SAFETY NET 3: Dynamically read exact columns from the Staging Table! ---
+                # This guarantees FastAPI perfectly matches what Databricks actually wrote.
+                col_query = f"""
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = '{dataset_name}' AND TABLE_NAME = 'stg_{dim_name}'
+                ORDER BY ORDINAL_POSITION
+                """
+                valid_columns = [row[0] for row in conn.execute(text(col_query)).fetchall()]
+                
+                if not valid_columns:
+                    print(f"[Orchestrator] Skipping {dim_name}, staging table empty or missing.")
+                    continue 
+                    
+                # The AI always puts the Primary Key first, and Databricks preserves that order!
+                primary_key = valid_columns[0] 
+
+                # If the real table doesn't exist yet, initialize it
+                init_query = f"""
+                IF NOT EXISTS (SELECT * FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = '{dataset_name}' AND t.name = '{dim_name}')
+                BEGIN
+                    SELECT * INTO {real_table} FROM {stg_table} WHERE 1=0;
+                END
+                """
+                conn.execute(text(init_query))
+
+                # Build the MERGE query using the ACTUAL columns, ignoring the AI JSON
+                update_set = ", ".join([f"target.[{col}] = source.[{col}]" for col in valid_columns if col != primary_key])
+                insert_cols = ", ".join([f"[{col}]" for col in valid_columns])
+                insert_vals = ", ".join([f"source.[{col}]" for col in valid_columns])
+
+                merge_query = f"""
+                MERGE INTO {real_table} AS target
+                USING {stg_table} AS source
+                ON target.[{primary_key}] = source.[{primary_key}]
+                """
+                if update_set:
+                    merge_query += f" WHEN MATCHED THEN UPDATE SET {update_set}"
+                merge_query += f" WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals});"
+
+                # Execute Merge and Cleanup
+                conn.execute(text(merge_query))
+                conn.execute(text(f"DROP TABLE {stg_table};"))
+            
+                # Commit the transaction!
+                conn.commit()
+
+            print("[Orchestrator] ETL Pipeline 100% Complete! Dimensions Merged.")
+            return run_id
 
     except Exception as e:
-        print(f"[Orchestrator] Job 2 Failed for Dataset: {dataset_name}. Error: {str(e)}")
+        print(f"[Orchestrator] ETL Failed: {str(e)}")
         raise e
