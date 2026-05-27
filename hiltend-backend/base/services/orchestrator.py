@@ -60,7 +60,6 @@ def trigger_spark_etl(file_path: str, dataset_name: str, ai_schema_map: str):
     w = _get_workspace_client()
 
     try:
-        # 1. Trigger Databricks Job
         response = w.jobs.run_now(
             job_id=int(settings.databricks_job_2_id),
             job_parameters={
@@ -75,82 +74,92 @@ def trigger_spark_etl(file_path: str, dataset_name: str, ai_schema_map: str):
         run_id = response.bind()['run_id']
         print(f"[Orchestrator] Databricks Job running (Run ID: {run_id}). Waiting for staging...")
 
-        # 2. Wait for Databricks to finish
         while True:
             run_info = w.jobs.get_run(run_id)
-            state = run_info.state.life_cycle_state
+            
+            # Extract the string values from the Databricks Enums!
+            state = run_info.state.life_cycle_state.value
+            result_state = run_info.state.result_state.value if run_info.state.result_state else None
             
             if state in ['TERMINATED', 'SKIPPED', 'INTERNAL_ERROR']:
-                if run_info.state.result_state == 'SUCCESS':
+                if result_state == 'SUCCESS':
                     print("[Orchestrator] Databricks staging complete!")
                     break
                 else:
                     raise Exception(f"Databricks Job Failed: {run_info.state.state_message}")
             
-            time.sleep(10) # Poll every 10 seconds
+            time.sleep(10)
 
-        # 3. FASTAPI EXECUTES THE MERGE!
-        print("[Orchestrator] Executing T-SQL MERGE via FastAPI...")
+
+        print("[Orchestrator] Executing Atomic T-SQL MERGE via FastAPI...")
         schema_map = json.loads(ai_schema_map)
         dimensions = schema_map.get("dimensions", {})
 
-        with engine.connect() as conn:
-            # Ensure the Azure SQL Schema exists
-            conn.execute(text(f"IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{dataset_name}') EXEC('CREATE SCHEMA [{dataset_name}]');"))
-            
-            for dim_name in dimensions.keys():
-                real_table = f"[{dataset_name}].[{dim_name}]"
-                stg_table = f"[{dataset_name}].[stg_{dim_name}]"
-
-                # --- SAFETY NET 3: Dynamically read exact columns from the Staging Table! ---
-                # This guarantees FastAPI perfectly matches what Databricks actually wrote.
-                col_query = f"""
-                SELECT COLUMN_NAME 
-                FROM INFORMATION_SCHEMA.COLUMNS 
-                WHERE TABLE_SCHEMA = '{dataset_name}' AND TABLE_NAME = 'stg_{dim_name}'
-                ORDER BY ORDINAL_POSITION
-                """
-                valid_columns = [row[0] for row in conn.execute(text(col_query)).fetchall()]
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{dataset_name}') EXEC('CREATE SCHEMA [{dataset_name}]');"))
                 
-                if not valid_columns:
-                    print(f"[Orchestrator] Skipping {dim_name}, staging table empty or missing.")
-                    continue 
+                for dim_name in dimensions.keys():
+                    real_table = f"[{dataset_name}].[{dim_name}]"
+                    stg_table = f"[{dataset_name}].[stg_{dim_name}]"
+
+                    col_query = f"""
+                    SELECT COLUMN_NAME 
+                    FROM INFORMATION_SCHEMA.COLUMNS 
+                    WHERE TABLE_SCHEMA = '{dataset_name}' AND TABLE_NAME = 'stg_{dim_name}'
+                    ORDER BY ORDINAL_POSITION
+                    """
+                    valid_columns = [row[0] for row in conn.execute(text(col_query)).fetchall()]
                     
-                # The AI always puts the Primary Key first, and Databricks preserves that order!
-                primary_key = valid_columns[0] 
+                    if not valid_columns:
+                        raise Exception(f"Missing staging table for {dim_name}. Aborting entire dataset load.")
+                        
+                    primary_key = valid_columns[0] 
 
-                # If the real table doesn't exist yet, initialize it
-                init_query = f"""
-                IF NOT EXISTS (SELECT * FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = '{dataset_name}' AND t.name = '{dim_name}')
-                BEGIN
-                    SELECT * INTO {real_table} FROM {stg_table} WHERE 1=0;
-                END
-                """
-                conn.execute(text(init_query))
+                    init_query = f"""
+                    IF NOT EXISTS (SELECT * FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = '{dataset_name}' AND t.name = '{dim_name}')
+                    BEGIN
+                        SELECT * INTO {real_table} FROM {stg_table} WHERE 1=0;
+                    END
+                    """
+                    conn.execute(text(init_query))
 
-                # Build the MERGE query using the ACTUAL columns, ignoring the AI JSON
-                update_set = ", ".join([f"target.[{col}] = source.[{col}]" for col in valid_columns if col != primary_key])
-                insert_cols = ", ".join([f"[{col}]" for col in valid_columns])
-                insert_vals = ", ".join([f"source.[{col}]" for col in valid_columns])
+                    update_set = ", ".join([f"target.[{col}] = source.[{col}]" for col in valid_columns if col != primary_key])
+                    insert_cols = ", ".join([f"[{col}]" for col in valid_columns])
+                    insert_vals = ", ".join([f"source.[{col}]" for col in valid_columns])
 
-                merge_query = f"""
-                MERGE INTO {real_table} AS target
-                USING {stg_table} AS source
-                ON target.[{primary_key}] = source.[{primary_key}]
-                """
-                if update_set:
-                    merge_query += f" WHEN MATCHED THEN UPDATE SET {update_set}"
-                merge_query += f" WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals});"
+                    merge_query = f"""
+                    MERGE INTO {real_table} AS target
+                    USING {stg_table} AS source
+                    ON target.[{primary_key}] = source.[{primary_key}]
+                    """
+                    if update_set:
+                        merge_query += f" WHEN MATCHED THEN UPDATE SET {update_set}"
+                    merge_query += f" WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals});"
 
-                # Execute Merge and Cleanup
-                conn.execute(text(merge_query))
-                conn.execute(text(f"DROP TABLE {stg_table};"))
+                    conn.execute(text(merge_query))
+                    print(f"[Orchestrator] Successfully staged MERGE for {dim_name}")
+
+                print("[Orchestrator] All dimensions processed without error. Committing transaction to Azure SQL...")
+
+        except Exception as e:
+            print(f"\n[Orchestrator] FATAL ERROR: {str(e)}")
+            print("[Orchestrator] Transaction ROLLED BACK. The database remains untouched.")
+            raise e
             
-                # Commit the transaction!
-                conn.commit()
+        finally:
+            print("\n[Orchestrator] Initiating post-run cleanup...")
+            try:
+                with engine.begin() as cleanup_conn:
+                    for dim_name in dimensions.keys():
+                        stg_table = f"[{dataset_name}].[stg_{dim_name}]"
+                        cleanup_conn.execute(text(f"DROP TABLE IF EXISTS {stg_table};"))
+                print("[Orchestrator] Databricks staging tables successfully dropped.")
+            except Exception as cleanup_error:
+                print(f"[Orchestrator] Warning: Staging cleanup failed: {str(cleanup_error)}")
 
-            print("[Orchestrator] ETL Pipeline 100% Complete! Dimensions Merged.")
-            return run_id
+        print("\n[Orchestrator] ETL Pipeline 100% Complete!")
+        return run_id
 
     except Exception as e:
         print(f"[Orchestrator] ETL Failed: {str(e)}")
