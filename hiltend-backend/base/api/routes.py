@@ -57,7 +57,6 @@ def process_pipeline_background(local_path: str, safe_name: str, dataset_name: s
         PIPELINE_STATUS[file_id] = {"step": "error", "message": f"Pipeline failed: {str(e)}"}
 
     finally:
-        # Clean up the local ephemeral file to save space on your laptop/container
         if os.path.exists(local_path):
             os.remove(local_path)
 
@@ -101,17 +100,17 @@ def ping_services(db: Session = Depends(get_db)):
         
     return {"status": "completed", "details": status}
 
-# @router.post("/api/v1/datasets", dependencies=[Security(azure_scheme)])
-# def create_dataset(payload: DatasetCreate, db: Session = Depends(get_db)):
-#     """Creates a new SQL Schema to isolate the dataset."""
-#     schema_name = payload.name.strip().replace(" ", "_")
-#     try:
-#         db.execute(text(f"CREATE SCHEMA [{schema_name}]"))
-#         db.commit()
-#         return {"status": "success", "dataset": schema_name}
-#     except Exception:
-#         db.rollback()
-#         return {"status": "success", "dataset": schema_name, "message": "Dataset already exists"}
+@router.post("/api/v1/datasets", dependencies=[Security(azure_scheme)])
+def create_dataset(payload: DatasetCreate, db: Session = Depends(get_db)):
+    """Creates a new SQL Schema to isolate the dataset."""
+    schema_name = payload.name.strip().replace(" ", "_")
+    try:
+        db.execute(text(f"CREATE SCHEMA [{schema_name}]"))
+        db.commit()
+        return {"status": "success", "dataset": schema_name}
+    except Exception:
+        db.rollback()
+        return {"status": "success", "dataset": schema_name, "message": "Dataset already exists"}
 
 
 @router.get("/api/v1/datasets", dependencies=[Security(azure_scheme)])
@@ -126,7 +125,6 @@ def get_datasets(db: Session = Depends(get_db)):
         return {"datasets": [row[0] for row in result]}
     except OperationalError as e:
         print(f"[Error] Database fetch failed (likely asleep): {e}")
-        # Return 503 instead of crashing the flow, allowing frontend to handle gracefully
         raise HTTPException(
             status_code=503, 
             detail="Database is waking up or temporarily unavailable. Please ping services and try again."
@@ -192,20 +190,16 @@ def get_dataset_details(dataset_name: str = Path(...), db: Session = Depends(get
 @router.delete("/api/v1/datasets/{dataset_name}", dependencies=[Security(azure_scheme)])
 def delete_dataset(dataset_name: str = Path(...), db: Session = Depends(get_db)):
     """Cascade deletes a schema and all its associated tables."""
-    # Basic sanitization check to prevent dropping core DB schemas
     if dataset_name.lower() in ['dbo', 'sys', 'guest', 'information_schema']:
         raise HTTPException(status_code=403, detail="Cannot delete system schemas.")
 
     try:
-        # 1. Fetch all tables within the schema
         table_query = text("SELECT table_name FROM information_schema.tables WHERE table_schema = :schema_name")
         tables = db.execute(table_query, {"schema_name": dataset_name}).fetchall()
         
-        # 2. Drop each table (requires raw formatting for object names, protected by brackets)
         for (table_name,) in tables:
             db.execute(text(f"DROP TABLE [{dataset_name}].[{table_name}]"))
         
-        # 3. Drop the schema itself
         db.execute(text(f"DROP SCHEMA [{dataset_name}]"))
         
         db.commit()
