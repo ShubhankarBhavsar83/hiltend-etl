@@ -38,7 +38,6 @@ const NAV_ITEMS: {
   {
     id: "datasets",
     label: "Datasets",
-    disabled: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -69,10 +68,10 @@ export default function Sidebar({ account, activeNav, onNavChange, onLogout }: S
       <aside className="hidden md:flex w-55 shrink-0 bg-gray-900 flex-col p-5 h-screen sticky top-0">
         {/* Logo */}
         <div className="flex items-center gap-2 text-base font-semibold px-2 pb-6">
-          <span className="inline-flex items-center justify-center w-6.5 h-6.5 bg-blue-600 rounded-sm font-semibold text-[13px] text-white">
-            H
-          </span>
-          <span className="text-white/90">iltend</span>
+          {/* <span className="inline-flex items-center justify-center w-6.5 h-6.5 bg-blue-600 rounded-sm font-semibold text-[13px] text-white">
+            
+          </span> */}
+          <span className="text-white/90">Hiltend</span>
         </div>
 
         {/* Nav */}

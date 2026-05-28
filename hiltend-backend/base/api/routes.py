@@ -1,8 +1,9 @@
 import os
 import uuid
 import shutil
-from fastapi import APIRouter, Depends, Security, UploadFile, Form, File, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, Security, UploadFile, Form, File, Path, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from sqlalchemy import text
 from base.core.security import azure_scheme
 from base.core.config import settings
@@ -26,7 +27,6 @@ PIPELINE_STATUS = {}
 def process_pipeline_background(local_path: str, safe_name: str, dataset_name: str, file_id: str):
     """Executes the pipeline and updates the status dictionary for the UI."""
     try:
-        # STEP 1: ALWAYS Stage to ADLS (Databricks needs a cloud path)
         PIPELINE_STATUS[file_id] = {"step": "staging", "message": "Uploading to ADLS Bronze Layer..."}
         
         target_path = upload_to_adls(local_path, safe_name)
@@ -76,17 +76,64 @@ def get_datasets(db: Session = Depends(get_db)):
     result = db.execute(query).fetchall()
     return {"datasets": [row[0] for row in result]}
 
-@router.post("/api/v1/datasets", dependencies=[Security(azure_scheme)])
-def create_dataset(payload: DatasetCreate, db: Session = Depends(get_db)):
-    """Creates a new SQL Schema to isolate the dataset."""
-    schema_name = payload.name.strip().replace(" ", "_")
+
+
+@router.post("/api/v1/ping", dependencies=[Security(azure_scheme)])
+def ping_services(db: Session = Depends(get_db)):
+    """Pings low-tier resources to wake them up from standby."""
+    status = {"sql": "offline", "databricks": "offline"}
+    
+    # Ping Azure SQL Serverless
     try:
-        db.execute(text(f"CREATE SCHEMA [{schema_name}]"))
-        db.commit()
-        return {"status": "success", "dataset": schema_name}
-    except Exception:
-        db.rollback()
-        return {"status": "success", "dataset": schema_name, "message": "Dataset already exists"}
+        db.execute(text("SELECT 1"))
+        status["sql"] = "awake"
+    except Exception as e:
+        print(f"[Ping] SQL DB Error: {e}")
+        
+    # Ping Databricks Serverless/Compute
+    try:
+        from base.services.orchestrator import _get_workspace_client
+        w = _get_workspace_client()
+        list(w.clusters.list()) 
+        status["databricks"] = "awake"
+    except Exception as e:
+        print(f"[Ping] Databricks Error: {e}")
+        
+    return {"status": "completed", "details": status}
+
+# @router.post("/api/v1/datasets", dependencies=[Security(azure_scheme)])
+# def create_dataset(payload: DatasetCreate, db: Session = Depends(get_db)):
+#     """Creates a new SQL Schema to isolate the dataset."""
+#     schema_name = payload.name.strip().replace(" ", "_")
+#     try:
+#         db.execute(text(f"CREATE SCHEMA [{schema_name}]"))
+#         db.commit()
+#         return {"status": "success", "dataset": schema_name}
+#     except Exception:
+#         db.rollback()
+#         return {"status": "success", "dataset": schema_name, "message": "Dataset already exists"}
+
+
+@router.get("/api/v1/datasets", dependencies=[Security(azure_scheme)])
+def get_datasets(db: Session = Depends(get_db)):
+    """Fetches all custom schemas from Azure SQL."""
+    try:
+        query = text("""
+            SELECT schema_name FROM information_schema.schemata 
+            WHERE schema_name NOT IN ('dbo', 'guest', 'sys', 'INFORMATION_SCHEMA', 'db_owner', 'db_accessadmin', 'db_securityadmin', 'db_ddladmin', 'db_backupoperator', 'db_datareader', 'db_datawriter', 'db_denydatareader', 'db_denydatawriter')
+        """)
+        result = db.execute(query).fetchall()
+        return {"datasets": [row[0] for row in result]}
+    except OperationalError as e:
+        print(f"[Error] Database fetch failed (likely asleep): {e}")
+        # Return 503 instead of crashing the flow, allowing frontend to handle gracefully
+        raise HTTPException(
+            status_code=503, 
+            detail="Database is waking up or temporarily unavailable. Please ping services and try again."
+        )
+    except Exception as e:
+        print(f"[Error] Unexpected error during dataset fetch: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 # --- Ingestion & Status Endpoints ---
@@ -117,3 +164,54 @@ async def ingest_file(
 @router.get("/api/v1/status/{file_id}", dependencies=[Security(azure_scheme)])
 def get_status(file_id: str):
     return PIPELINE_STATUS.get(file_id, {"step": "unknown", "message": "Status not found."})
+
+@router.get("/api/v1/datasets/{dataset_name}", dependencies=[Security(azure_scheme)])
+def get_dataset_details(dataset_name: str = Path(...), db: Session = Depends(get_db)):
+    """Fetches details and tables for a specific dataset schema."""
+    try:
+        query = text("""
+            SELECT t.name, t.create_date
+            FROM sys.tables t
+            JOIN sys.schemas s ON t.schema_id = s.schema_id
+            WHERE s.name = :schema_name
+        """)
+        result = db.execute(query, {"schema_name": dataset_name}).fetchall()
+        
+        tables = [{"name": row[0], "created_at": row[1]} for row in result]
+        
+        return {
+            "name": dataset_name,
+            "table_count": len(tables),
+            "tables": tables
+        }
+    except Exception as e:
+        print(f"[Error] Failed to fetch dataset details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch dataset details.")
+
+    
+@router.delete("/api/v1/datasets/{dataset_name}", dependencies=[Security(azure_scheme)])
+def delete_dataset(dataset_name: str = Path(...), db: Session = Depends(get_db)):
+    """Cascade deletes a schema and all its associated tables."""
+    # Basic sanitization check to prevent dropping core DB schemas
+    if dataset_name.lower() in ['dbo', 'sys', 'guest', 'information_schema']:
+        raise HTTPException(status_code=403, detail="Cannot delete system schemas.")
+
+    try:
+        # 1. Fetch all tables within the schema
+        table_query = text("SELECT table_name FROM information_schema.tables WHERE table_schema = :schema_name")
+        tables = db.execute(table_query, {"schema_name": dataset_name}).fetchall()
+        
+        # 2. Drop each table (requires raw formatting for object names, protected by brackets)
+        for (table_name,) in tables:
+            db.execute(text(f"DROP TABLE [{dataset_name}].[{table_name}]"))
+        
+        # 3. Drop the schema itself
+        db.execute(text(f"DROP SCHEMA [{dataset_name}]"))
+        
+        db.commit()
+        return {"status": "success", "message": f"Dataset '{dataset_name}' deleted."}
+    
+    except Exception as e:
+        db.rollback()
+        print(f"[Error] Failed to delete dataset: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

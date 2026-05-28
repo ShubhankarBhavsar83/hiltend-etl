@@ -20,7 +20,14 @@ params = urllib.parse.quote_plus(odbc_str)
 engine_url = f"mssql+pyodbc:///?odbc_connect={params}"
 
 is_dev = settings.environment != "cloud"
-engine = create_engine(engine_url, echo=is_dev, pool_pre_ping=True)
+engine = create_engine(
+    engine_url, 
+    echo=is_dev, 
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    pool_timeout=30,
+    connect_args={"connect_timeout": 30}
+)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

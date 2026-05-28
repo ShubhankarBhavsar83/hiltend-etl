@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from "react";
-import { useMsal } from "@azure/msal-react";
-import { loginRequest } from "../util/authConfig";
+// import { useMsal } from "@azure/msal-react";
+// import { loginRequest } from "../util/authConfig";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Alert, AlertDescription,  } from "@/components/ui/alert";
-// import { Badge } from "@/components/ui/badge";
-// import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription, } from "@/components/ui/alert";
+
 import { cn } from "@/lib/utils";
+import { useApiClient } from "../hooks/useApiClient";
+import axios from "axios";
 
 type PipelineStep = "idle" | "queued" | "staging" | "extracting" | "ai_mapping" | "etl_running" | "completed" | "error";
 
@@ -19,10 +20,11 @@ interface UploadPanelProps {
 }
 
 export default function UploadPanel({ datasets, setDatasets, selectedDataset, setSelectedDataset }: UploadPanelProps) {
-  const { instance, accounts } = useMsal();
+  // const { instance, accounts } = useMsal();
+  const apiClient = useApiClient(); // <-- Initialize Axios 
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  
+
   // Dataset Creation State
   const [newDatasetName, setNewDatasetName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -39,20 +41,12 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
     if (!newDatasetName.trim()) return;
     setIsCreating(true);
     try {
-      const token = await instance.acquireTokenSilent({ ...loginRequest, account: accounts[0] });
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/datasets`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token.accessToken}` },
-        body: JSON.stringify({ name: newDatasetName }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDatasets([...datasets, data.dataset]);
-        setSelectedDataset(data.dataset);
-        setNewDatasetName("");
-      }
+      const res = await apiClient.post('/api/v1/datasets', { name: newDatasetName });
+      setDatasets([...datasets, res.data.dataset]);
+      setSelectedDataset(res.data.dataset);
+      setNewDatasetName("");
     } catch (err) {
-      console.error(err);
+      console.error("Dataset creation failed:", err);
     } finally {
       setIsCreating(false);
     }
@@ -69,23 +63,42 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
     setPipelineStep("queued");
     setErrorMsg("");
 
+    //   try {
+    //     const formData = new FormData();
+    //     formData.append("dataset_name", selectedDataset);
+    //     formData.append("file", file);
+
+    //     // Axios natively handles FormData
+    //     const res = await apiClient.post('/api/v1/ingest', formData);
+    //     setFileId(res.data.file_id);
+    //   } catch (err: unknown) {
+    //     setErrorMsg(err.response?.data?.detail || err.message || "Upload failed.");
+    //     setPipelineStep("error");
+    //   }
+
+
     try {
-      const token = await instance.acquireTokenSilent({ ...loginRequest, account: accounts[0] });
       const formData = new FormData();
       formData.append("dataset_name", selectedDataset);
       formData.append("file", file);
 
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/ingest`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token.accessToken}` },
-        body: formData,
-      });
+      // Axios natively handles FormData
+      const res = await apiClient.post('/api/v1/ingest', formData);
+      setFileId(res.data.file_id);
+    } catch (err: unknown) {
+      // 1. Check if it's a specific Axios API error
+      if (axios.isAxiosError(err)) {
+        setErrorMsg(err.response?.data?.detail || err.message || "Upload failed.");
+      }
+      // 2. Check if it's a standard JavaScript Error (e.g., network down entirely)
+      else if (err instanceof Error) {
+        setErrorMsg(err.message);
+      }
+      // 3. Fallback for completely unknown errors
+      else {
+        setErrorMsg("An unexpected error occurred during upload.");
+      }
 
-      if (!res.ok) throw new Error("Upload failed to initiate");
-      const data = await res.json();
-      setFileId(data.file_id);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Upload failed.");
       setPipelineStep("error");
     }
   };
@@ -96,38 +109,32 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
 
     const interval = setInterval(async () => {
       try {
-        const token = await instance.acquireTokenSilent({ ...loginRequest, account: accounts[0] });
-        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/status/${fileId}`, {
-          headers: { Authorization: `Bearer ${token.accessToken}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setPipelineStep(data.step);
-          setStatusMessage(data.message);
-          if (data.step === "completed" || data.step === "error") clearInterval(interval);
-        }
+        const res = await apiClient.get(`/api/v1/status/${fileId}`);
+        setPipelineStep(res.data.step);
+        setStatusMessage(res.data.message);
+        if (res.data.step === "completed" || res.data.step === "error") clearInterval(interval);
       } catch (err) {
         console.error("Polling error", err);
       }
-    }, 3000); // Poll every 3 seconds
+    }, 3000);
 
     return () => clearInterval(interval);
-  }, [fileId, pipelineStep, instance, accounts]);
+  }, [fileId, pipelineStep, apiClient]);
 
   const isActive = pipelineStep !== "idle" && pipelineStep !== "completed" && pipelineStep !== "error";
 
   return (
     <div className="flex flex-col gap-8 max-w-160">
-      
+
       {/* 1. Dataset Selection / Creation */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col gap-4">
         <h3 className="text-[14px] font-semibold text-gray-900">Target Dataset</h3>
-        
+
         {datasets.length > 0 ? (
           <div className="flex gap-3 items-end">
             <div className="flex-1 flex flex-col gap-2">
               <Label className="text-xs text-gray-500">Select an existing dataset</Label>
-              <select 
+              <select
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 value={selectedDataset}
                 onChange={(e) => setSelectedDataset(e.target.value)}
@@ -138,10 +145,10 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
             </div>
             <span className="text-sm text-gray-400 mb-2">or</span>
             <div className="flex-1 flex gap-2">
-              <Input 
-                placeholder="New dataset name..." 
-                value={newDatasetName} 
-                onChange={(e) => setNewDatasetName(e.target.value)} 
+              <Input
+                placeholder="New dataset name..."
+                value={newDatasetName}
+                onChange={(e) => setNewDatasetName(e.target.value)}
                 disabled={isActive}
               />
               <Button onClick={handleCreateDataset} disabled={isCreating || !newDatasetName || isActive} variant="outline">
@@ -151,8 +158,8 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
           </div>
         ) : (
           <div className="flex gap-2">
-             <Input placeholder="Create your first dataset..." value={newDatasetName} onChange={(e) => setNewDatasetName(e.target.value)} />
-             <Button onClick={handleCreateDataset} disabled={isCreating || !newDatasetName}>Create</Button>
+            <Input placeholder="Create your first dataset..." value={newDatasetName} onChange={(e) => setNewDatasetName(e.target.value)} />
+            <Button onClick={handleCreateDataset} disabled={isCreating || !newDatasetName}>Create</Button>
           </div>
         )}
       </div>
@@ -178,7 +185,7 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
               {!isActive && <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setFile(null); }}>Clear</Button>}
             </div>
           ) : (
-             <span className="text-sm text-gray-500">Drag & drop a CSV here, or click to browse</span>
+            <span className="text-sm text-gray-500">Drag & drop a CSV here, or click to browse</span>
           )}
         </div>
 
@@ -194,7 +201,7 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col gap-4">
           <h3 className="text-[14px] font-semibold text-gray-900">Live Pipeline Status</h3>
           <p className="text-xs text-blue-600 font-mono mb-2">{statusMessage}</p>
-          
+
           <div className="flex flex-col gap-3">
             <Checkpoint label="1. Stage to ADLS Bronze Layer" activeKeys={["staging"]} doneKeys={["extracting", "ai_mapping", "etl_running", "completed"]} current={pipelineStep} />
             <Checkpoint label="2. Databricks Serverless Header Extract" activeKeys={["extracting"]} doneKeys={["ai_mapping", "etl_running", "completed"]} current={pipelineStep} />
