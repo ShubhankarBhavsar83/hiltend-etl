@@ -40,7 +40,6 @@ export default function DatasetsPage({ datasets, setDatasets, selectedDataset, s
     }
   }, [apiClient]);
 
-  // Load details when a dataset is clicked in the list
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (activeViewDataset) fetchDatasetDetails(activeViewDataset);
@@ -125,7 +124,6 @@ export default function DatasetsPage({ datasets, setDatasets, selectedDataset, s
         </div>
       </div>
 
-      {/* Right Pane: Dataset Details */}
       <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
         {!activeViewDataset ? (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm font-mono bg-gray-50">

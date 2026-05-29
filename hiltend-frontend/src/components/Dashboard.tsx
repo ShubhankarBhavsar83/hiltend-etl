@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback } from "react";
 import { useMsal } from "@azure/msal-react";
 import Sidebar, { type NavItem } from "./Sidebar";
 import UploadPanel from "./UploadPanel";
-// import { loginRequest } from "../util/authConfig";
 import { Button } from "@/components/ui/button";
 import { useApiClient } from "@/hooks/useApiClient";
 import type { AxiosError } from "axios";
@@ -25,6 +24,8 @@ export default function Dashboard({ onLogout }: DashboardProps) {
 
   const [pingStatus, setPingStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // 1. Wrap the function in useCallback
   const fetchDatasets = useCallback(async () => {
@@ -68,33 +69,72 @@ export default function Dashboard({ onLogout }: DashboardProps) {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/20 z-40 md:hidden transition-opacity"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
       <Sidebar
         account={account}
         activeNav={activeNav}
         onNavChange={setActiveNav}
         onLogout={onLogout}
+        isOpen={isSidebarOpen}
       />
 
-      <main className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
-        <div className="flex justify-between items-start px-10 pt-8 pb-6 border-b border-gray-200 bg-white shrink-0 md:px-10 md:pt-8">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-lg font-semibold tracking-tight text-gray-900">
-                {PAGE_TITLES[activeNav]}
-              </h1>
-              {selectedDataset && (
-                <span className="bg-gray-100 text-gray-600 border border-gray-200 text-xs px-2 py-0.5 rounded-full font-mono flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span>
-                  Active: {selectedDataset}
-                </span>
+<main className="flex-1 overflow-y-auto bg-gray-50 flex flex-col min-w-0">
+        <div className="flex justify-between items-start px-6 md:px-10 pt-8 pb-6 border-b border-gray-200 bg-white shrink-0">
+          
+          <div className="flex items-start gap-4">
+            {/* 4. The Hamburger Toggle Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="mt-0.5 shrink-0 text-gray-500 hover:text-gray-900 hover:bg-gray-100 hidden md:flex"
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </Button>
+            
+            {/* Mobile Hamburger (Only visible on small screens) */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="mt-0.5 shrink-0 text-gray-500 hover:text-gray-900 hover:bg-gray-100 md:hidden"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </Button>
+
+            <div>
+              <div className="flex items-center gap-3 mb-1">
+                <h1 className="text-lg font-semibold tracking-tight text-gray-900">
+                  {PAGE_TITLES[activeNav]}
+                </h1>
+                {selectedDataset && (
+                  <span className="bg-gray-100 text-gray-600 border border-gray-200 text-xs px-2 py-0.5 rounded-full font-mono flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span>
+                    Active: {selectedDataset}
+                  </span>
+                )}
+              </div>
+              <p className="text-[13px] text-gray-500">{PAGE_SUBTITLES[activeNav]}</p>
+              {fetchError && (
+                 <p className="text-[12px] text-amber-600 mt-2 font-medium bg-amber-50 px-2 py-1 rounded inline-block">
+                   ⚠️ {fetchError}
+                 </p>
               )}
             </div>
-            <p className="text-[13px] text-gray-500">{PAGE_SUBTITLES[activeNav]}</p>
-            {fetchError && (
-              <p className="text-[12px] text-amber-600 mt-2 font-medium bg-amber-50 px-2 py-1 rounded inline-block">
-                Fetch Error: {fetchError}
-              </p>
-            )}
           </div>
 
           <Button
