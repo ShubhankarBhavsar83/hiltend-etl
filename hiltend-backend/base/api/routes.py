@@ -115,7 +115,6 @@ def create_dataset(payload: DatasetCreate, db: Session = Depends(get_db)):
 
 @router.get("/api/v1/datasets", dependencies=[Security(azure_scheme)])
 def get_datasets(db: Session = Depends(get_db)):
-    """Fetches all custom schemas from Azure SQL."""
     try:
         query = text("""
             SELECT schema_name FROM information_schema.schemata 
