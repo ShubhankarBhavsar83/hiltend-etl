@@ -1,6 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-// import { useMsal } from "@azure/msal-react";
-// import { loginRequest } from "../util/authConfig";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,9 +18,8 @@ interface UploadPanelProps {
 }
 
 export default function UploadPanel({ datasets, setDatasets, selectedDataset, setSelectedDataset }: UploadPanelProps) {
-  // const { instance, accounts } = useMsal();
-  const apiClient = useApiClient(); // <-- Initialize Axios 
-  const [file, setFile] = useState<File | null>(null);
+  const apiClient = useApiClient();
+  const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
   // Dataset Creation State
@@ -30,7 +27,8 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
   const [isCreating, setIsCreating] = useState(false);
 
   // Pipeline State
-  const [fileId, setFileId] = useState<string | null>(null);
+  const [fileIds, setFileIds] = useState<string[]>([]);
+  const [activeFileIndex, setActiveFileIndex] = useState(0);
   const [pipelineStep, setPipelineStep] = useState<PipelineStep>("idle");
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -53,73 +51,76 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
   };
 
   // --- Upload Handlers ---
-  const acceptFile = (f: File) => {
-    if (!f.name.endsWith(".csv")) { setErrorMsg("Only .csv files are supported."); return; }
-    setFile(f); setPipelineStep("idle"); setErrorMsg(""); setFileId(null);
+  const acceptFiles = (incomingFiles: FileList | File[]) => {
+    const validFiles = Array.from(incomingFiles).filter(f => f.name.endsWith(".csv"));
+    if (validFiles.length === 0) { setErrorMsg("Only .csv files are supported."); return; }
+
+    setFiles(prev => [...prev, ...validFiles]);
+    setPipelineStep("idle");
+    setErrorMsg("");
+    setFileIds([]);
+    setActiveFileIndex(0);
+  };
+
+  const removeFile = (indexToRemove: number) => {
+    setFiles(files.filter((_, idx) => idx !== indexToRemove));
   };
 
   const handleSubmit = async () => {
-    if (!file || !selectedDataset) return;
+    if (files.length === 0 || !selectedDataset) return;
     setPipelineStep("queued");
     setErrorMsg("");
-
-    //   try {
-    //     const formData = new FormData();
-    //     formData.append("dataset_name", selectedDataset);
-    //     formData.append("file", file);
-
-    //     // Axios natively handles FormData
-    //     const res = await apiClient.post('/api/v1/ingest', formData);
-    //     setFileId(res.data.file_id);
-    //   } catch (err: unknown) {
-    //     setErrorMsg(err.response?.data?.detail || err.message || "Upload failed.");
-    //     setPipelineStep("error");
-    //   }
-
 
     try {
       const formData = new FormData();
       formData.append("dataset_name", selectedDataset);
-      formData.append("file", file);
+      // Append each file to the 'files' array in FormData
+      files.forEach(f => formData.append("files", f));
 
-      // Axios natively handles FormData
       const res = await apiClient.post('/api/v1/ingest', formData);
-      setFileId(res.data.file_id);
+      setFileIds(res.data.file_ids);
     } catch (err: unknown) {
-      // 1. Check if it's a specific Axios API error
       if (axios.isAxiosError(err)) {
         setErrorMsg(err.response?.data?.detail || err.message || "Upload failed.");
-      }
-      // 2. Check if it's a standard JavaScript Error (e.g., network down entirely)
-      else if (err instanceof Error) {
+      } else if (err instanceof Error) {
         setErrorMsg(err.message);
-      }
-      // 3. Fallback for completely unknown errors
-      else {
+      } else {
         setErrorMsg("An unexpected error occurred during upload.");
       }
-
       setPipelineStep("error");
     }
   };
 
   // --- Status Polling ---
   useEffect(() => {
-    if (!fileId || pipelineStep === "completed" || pipelineStep === "error") return;
+    if (fileIds.length === 0 || activeFileIndex >= fileIds.length) return;
+
+    const currentId = fileIds[activeFileIndex];
 
     const interval = setInterval(async () => {
       try {
-        const res = await apiClient.get(`/api/v1/status/${fileId}`);
+        const res = await apiClient.get(`/api/v1/status/${currentId}`);
         setPipelineStep(res.data.step);
-        setStatusMessage(res.data.message);
-        if (res.data.step === "completed" || res.data.step === "error") clearInterval(interval);
+
+        // Add a prefix so the user knows which file is currently processing
+        setStatusMessage(`[File ${activeFileIndex + 1} of ${fileIds.length}] ${res.data.message}`);
+
+        if (res.data.step === "completed" || res.data.step === "error") {
+          clearInterval(interval);
+
+          // Move to the next file in the queue if one exists
+          if (activeFileIndex < fileIds.length - 1) {
+            setActiveFileIndex(prev => prev + 1);
+            setPipelineStep("queued"); // Reset visual status for the new file
+          }
+        }
       } catch (err) {
         console.error("Polling error", err);
       }
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [fileId, pipelineStep, apiClient]);
+  }, [fileIds, activeFileIndex, apiClient]);
 
   const isActive = pipelineStep !== "idle" && pipelineStep !== "completed" && pipelineStep !== "error";
 
@@ -166,33 +167,54 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
 
       {/* 2. File Upload */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 flex flex-col gap-5 shadow-sm">
-        <Label className="text-[14px] font-semibold text-gray-900">Upload Data File</Label>
+        <div className="flex justify-between items-center">
+          <Label className="text-[14px] font-semibold text-gray-900">Upload Data Files</Label>
+          {files.length > 0 && !isActive && (
+            <Button variant="ghost" size="sm" className="h-6 text-xs text-gray-500" onClick={() => setFiles([])}>Clear All</Button>
+          )}
+        </div>
+
         <div
           className={cn(
-            "border-[1.5px] border-dashed rounded-lg px-6 py-8 flex items-center justify-center cursor-pointer transition-colors bg-gray-50",
+            "border-[1.5px] border-dashed rounded-lg px-6 py-8 flex flex-col items-center justify-center cursor-pointer transition-colors bg-gray-50 min-h-[120px]",
             isDragging ? "border-blue-600 bg-blue-50" : "border-gray-200 hover:border-blue-500",
-            file && "border-solid border-blue-500 bg-blue-50 py-4"
+            files.length > 0 && "border-solid border-blue-500 bg-blue-50/30 py-4 cursor-default"
           )}
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
-          onDrop={(e) => { e.preventDefault(); setIsDragging(false); acceptFile(e.dataTransfer.files[0]); }}
-          onClick={() => !isActive && fileInputRef.current?.click()}
+          onDrop={(e) => { e.preventDefault(); setIsDragging(false); acceptFiles(e.dataTransfer.files); }}
+          onClick={() => !isActive && files.length === 0 && fileInputRef.current?.click()}
         >
-          <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={(e) => e.target.files && acceptFile(e.target.files[0])} disabled={isActive} />
-          {file ? (
-            <div className="flex items-center gap-3 w-full text-blue-700">
-              <span className="font-medium text-sm truncate flex-1">{file.name}</span>
-              {!isActive && <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setFile(null); }}>Clear</Button>}
+          {/* UPDATED: Multiple input accepted */}
+          <input ref={fileInputRef} type="file" multiple accept=".csv" className="hidden" onChange={(e) => e.target.files && acceptFiles(e.target.files)} disabled={isActive} />
+
+          {files.length > 0 ? (
+            <div className="flex flex-col gap-2 w-full">
+              {files.map((f, i) => (
+                <div key={i} className="flex items-center justify-between text-blue-800 bg-white border border-blue-100 shadow-sm px-3 py-2 rounded-md">
+                  <span className="font-medium text-[13px] truncate flex-1">{f.name}</span>
+                  {!isActive && (
+                    <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); removeFile(i); }} className="h-6 px-2 text-xs text-gray-400 hover:text-red-600">
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {!isActive && (
+                <Button variant="outline" size="sm" className="mt-2 text-xs border-dashed" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
+                  + Add More Files
+                </Button>
+              )}
             </div>
           ) : (
-            <span className="text-sm text-gray-500">Drag & drop a CSV here, or click to browse</span>
+            <span className="text-sm text-gray-500">Drag & drop multiple CSVs here, or click to browse</span>
           )}
         </div>
 
         {errorMsg && <Alert variant="destructive"><AlertDescription>{errorMsg}</AlertDescription></Alert>}
 
-        <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white" onClick={handleSubmit} disabled={!file || !selectedDataset || isActive}>
-          {isActive ? "Processing Pipeline..." : "Start Ingestion"}
+        <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white" onClick={handleSubmit} disabled={files.length === 0 || !selectedDataset || isActive}>
+          {isActive ? "Processing Batch..." : `Start Ingestion (${files.length} file${files.length > 1 ? 's' : ''})`}
         </Button>
       </div>
 

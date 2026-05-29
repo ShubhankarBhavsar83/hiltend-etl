@@ -31,21 +31,27 @@ def run_etl():
             df = df.withColumnRenamed(col_name, clean_name)
     
     schema_map = json.loads(ai_schema_map_str)
+    
+    # Extract Dimensions
     dimensions = {}
     for dim_name, columns in schema_map.get("dimensions", {}).items():
         clean_cols = [c.replace("`", "").strip() for c in columns]
         valid_cols = [c for c in clean_cols if c in df.columns]
-        
         if valid_cols:
             dimensions[dim_name] = valid_cols
             
+    # Extract Dynamic Fact Table Name & Columns
+    fact_table_name = schema_map.get("fact_table_name", "Fact_Data").replace("`", "").strip()
     raw_fact_cols = [c.replace("`", "").strip() for c in schema_map.get("fact_table", [])]
     fact_columns = [c for c in raw_fact_cols if c in df.columns]
 
-    # PHASE A: STAGE Dimensions (Overwrite)
+    # PHASE A: STAGE Dimensions 
     for dim_name, columns in dimensions.items():
         print(f"Staging Dimension: {dim_name}")
-        dim_df = df.select(*columns).distinct().dropna(how="all")
+        
+        primary_key = columns[0]
+        
+        dim_df = df.select(*columns).dropna(subset=[primary_key]).dropDuplicates(subset=[primary_key])
         
         dim_df.write \
             .format("sqlserver") \
@@ -59,19 +65,22 @@ def run_etl():
             .save()
 
     # PHASE B: Process Facts (Append)
-    print(f"Processing Fact Table...")
-    fact_df = df.select(*fact_columns)
-    
-    fact_df.write \
-        .format("sqlserver") \
-        .option("host", server_host) \
-        .option("port", "1433") \
-        .option("user", db_user) \
-        .option("password", db_pass) \
-        .option("database", database_name) \
-        .option("dbtable", f"[{dataset_name}].[Fact_Events]") \
-        .mode("append") \
-        .save()
+    if fact_columns:
+        print(f"Processing Fact Table: {fact_table_name}...")
+        fact_df = df.select(*fact_columns)
+        
+        fact_df.write \
+            .format("sqlserver") \
+            .option("host", server_host) \
+            .option("port", "1433") \
+            .option("user", db_user) \
+            .option("password", db_pass) \
+            .option("database", database_name) \
+            .option("dbtable", f"[{dataset_name}].[{fact_table_name}]") \
+            .mode("append") \
+            .save()
+    else:
+        print("No fact table columns mapped. Skipping Fact append (Pure dimension update).")
 
     print("Databricks Staging Completed Successfully!")
 

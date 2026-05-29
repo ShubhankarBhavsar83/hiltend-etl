@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useApiClient } from "@/hooks/useApiClient";
 import type { AxiosError } from "axios";
 import DatasetsPage from "./DatasetsPage";
+import DataExplorer from "./DataExplorer";
 
 interface DashboardProps {
   onLogout: () => void;
@@ -173,20 +174,22 @@ export default function Dashboard({ onLogout }: DashboardProps) {
               setSelectedDataset={setSelectedDataset}
             />
           )}          
-          {activeNav === "analytics" && <Placeholder label="Analytics" />}
+          {activeNav === "analytics" && (
+             <DataExplorer selectedDataset={selectedDataset} />
+          )}
         </div>
       </main>
     </div>
   );
 }
 
-function Placeholder({ label }: { label: string }) {
-  return (
-    <div className="flex items-center justify-center h-50 border-[1.5px] border-dashed border-gray-200 rounded-xl text-gray-400 text-[13.5px] font-mono bg-white">
-      <span>{label} — coming soon</span>
-    </div>
-  );
-}
+// function Placeholder({ label }: { label: string }) {
+//   return (
+//     <div className="flex items-center justify-center h-50 border-[1.5px] border-dashed border-gray-200 rounded-xl text-gray-400 text-[13.5px] font-mono bg-white">
+//       <span>{label} — coming soon</span>
+//     </div>
+//   );
+// }
 
 const PAGE_TITLES: Record<NavItem, string> = {
   ingest: "Data Ingestion",

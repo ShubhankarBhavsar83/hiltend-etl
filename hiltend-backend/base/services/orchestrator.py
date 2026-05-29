@@ -25,10 +25,7 @@ def _get_workspace_client() -> WorkspaceClient:
     )
 
 def extract_headers_via_databricks(file_path: str) -> bool:
-    """
-    JOB 1: Triggers a lightweight Databricks job to read CSV headers,
-    waits for it to complete.
-    """
+
     print(f"[Orchestrator] Triggering Header Extraction (Job 1) for: {file_path}")
     w = _get_workspace_client()
 
@@ -53,9 +50,7 @@ def extract_headers_via_databricks(file_path: str) -> bool:
         raise e
 
 def trigger_spark_etl(file_path: str, dataset_name: str, ai_schema_map: str):
-    """
-    Triggers Databricks to stage data, then FastAPI runs the MERGE.
-    """
+
     print(f"[Orchestrator] Triggering ETL for dataset: {dataset_name}")
     w = _get_workspace_client()
 
@@ -77,7 +72,6 @@ def trigger_spark_etl(file_path: str, dataset_name: str, ai_schema_map: str):
         while True:
             run_info = w.jobs.get_run(run_id)
             
-            # Extract the string values from the Databricks Enums!
             state = run_info.state.life_cycle_state.value
             result_state = run_info.state.result_state.value if run_info.state.result_state else None
             
@@ -123,6 +117,30 @@ def trigger_spark_etl(file_path: str, dataset_name: str, ai_schema_map: str):
                     END
                     """
                     conn.execute(text(init_query))
+
+                    target_col_query = f"""
+                    SELECT COLUMN_NAME 
+                    FROM INFORMATION_SCHEMA.COLUMNS 
+                    WHERE TABLE_SCHEMA = '{dataset_name}' AND TABLE_NAME = '{dim_name}'
+                    """
+                    target_columns = [row[0] for row in conn.execute(text(target_col_query)).fetchall()]
+                    
+                    for col in valid_columns:
+                        if col not in target_columns:
+                            dt_query = f"SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='{dataset_name}' AND TABLE_NAME='stg_{dim_name}' AND COLUMN_NAME='{col}'"
+                            dt_row = conn.execute(text(dt_query)).fetchone()
+                            if dt_row:
+                                d_type = dt_row[0]
+                                c_len = dt_row[1]
+                                type_str = d_type
+                                if d_type in ['varchar', 'nvarchar', 'char', 'nchar']:
+                                    if c_len == -1:
+                                        type_str += "(MAX)"
+                                    elif c_len:
+                                        type_str += f"({c_len})"
+                                        
+                                print(f"[Orchestrator] Schema Evolution: Adding column [{col}] {type_str} to {real_table}")
+                                conn.execute(text(f"ALTER TABLE {real_table} ADD [{col}] {type_str};"))
 
                     update_set = ", ".join([f"target.[{col}] = source.[{col}]" for col in valid_columns if col != primary_key])
                     insert_cols = ", ".join([f"[{col}]" for col in valid_columns])

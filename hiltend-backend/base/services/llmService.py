@@ -9,6 +9,7 @@ from base.core.config import settings
 
 
 class StarSchemaMap(BaseModel):
+    fact_table_name: str = Field(description="Name of the central fact table. Prefix with 'Fact_'.")
     fact_table: List[str] = Field(description="List of column names for the central fact table.")
     dimensions: Dict[str, List[str]] = Field(description="Dictionary where keys are dimension table names, and values are lists of columns.")
 
@@ -27,13 +28,19 @@ class LLMService:
             api_key=api_key
         )
 
-    def generate_relational_mapping(self, dataset_name: str, headers: list[str]) -> StarSchemaMap:
-        """
-        JOB 1: Takes CSV headers and returns a strict JSON Star Schema map.
-        """
+    def generate_relational_mapping(self, dataset_name: str, headers: list[str], existing_schema: str = "") -> StarSchemaMap:
+
+        schema_instruction = f"""
+        EXISTING SCHEMA CONTEXT:
+        {existing_schema}
+        CRITICAL: Map the new CSV headers to the EXISTING table names above if they represent the same entities (e.g., updating existing HR records, appending new sales). If the CSV introduces entirely new data concepts not present in the existing schema, invent NEW table names.
+        """ if existing_schema else "No existing tables. Design a brand new Star Schema."
+
         system_prompt = f"""
-       You are an expert Data Architect. The user is uploading a new CSV dataset named '{dataset_name}'.
+        You are an expert Data Architect. The user is uploading a new CSV dataset into the SQL schema '{dataset_name}'.
         Group the provided column headers into a logical Star Schema.
+
+        {schema_instruction}
 
         CRITICAL DATABASE RULES:
         1. Identify the primary key column(s) (e.g., 'id', 'uuid', or the closest equivalent).
@@ -42,11 +49,11 @@ class LLMService:
 
         CRITICAL FORMATTING INSTRUCTION: 
         You MUST respond in pure JSON adhering EXACTLY to the following structure. Do not add nested objects. Do not add extra keys like 'name' or 'metrics'. 'fact_table' MUST be a flat array of strings. 'dimensions' MUST be a dictionary of arrays.
-
         {{
+            "fact_table_name": "Fact_YourTableName",
             "fact_table": ["id", "fact_column_1", "fact_column_2"],
             "dimensions": {{
-                "Dim_Time": ["id", "time_column_1", "time_column_2"],
+                "Dim_Time": ["id", "time_column_1"],
                 "Dim_User": ["id", "user_column_1"]
             }}
         }}
@@ -62,27 +69,17 @@ class LLMService:
                     {"role": "user", "content": user_prompt}
                 ],
                 response_format={"type": "json_object"}, 
-                temperature=0.1
+                temperature=0.0
             )
             
             raw_content = response.choices[0].message.content
-            
             clean_content = raw_content.replace("```json", "").replace("```", "").strip()
-            
             raw_dict = json.loads(clean_content)
             
             if "star_schema" in raw_dict:
                 raw_dict = raw_dict["star_schema"]
                 
-            if isinstance(raw_dict.get("fact_table"), dict):
-                print("[AI Fix] Flattening hallucinated fact_table object...")
-                for val in raw_dict["fact_table"].values():
-                    if isinstance(val, list):
-                        raw_dict["fact_table"] = val
-                        break
-                        
             validated_schema = StarSchemaMap(**raw_dict)
-            
             return validated_schema
 
         except Exception as e:
@@ -90,9 +87,7 @@ class LLMService:
             raise e
         
     def generate_sql_query(self, user_question: str, db_schema_context: str) -> str:
-        """
-        JOB 3: Takes a natural language question and the DB Schema, returns T-SQL.
-        """
+
         system_prompt = f"""
         You are an expert Azure SQL Database Architect. 
         Translate the user's question into purely valid T-SQL.
@@ -121,4 +116,60 @@ class LLMService:
 
         except Exception as e:
             print(f"Error generating SQL query: {e}")
+            raise e
+        
+        
+    def generate_join_query(self, dataset_name: str, selected_columns: list[str], schema_context: str) -> str:
+        
+        # system_prompt = f"""
+        # You are an expert Data Engineer working with Azure SQL. 
+        # The user wants to build a custom view by selecting specific columns across separate tables in the '{dataset_name}' schema.
+        
+        # SCHEMA STRUCTURE CONTEXT:
+        # {schema_context}
+        
+        # YOUR TASK:
+        # Generate a single, optimized T-SQL SELECT query that retrieves exactly the columns requested by the user.
+        # Determine the correct JOIN relationships based on the primary/foreign keys visible in the schema context (e.g., joining a dimension to a fact table on their shared ID column).
+        
+        # CRITICAL RULES:
+        # 1. Fully qualify all column names using bracket notation: [{dataset_name}].[TableName].[ColumnName]
+        # 2. Use proper INNER JOIN or LEFT JOIN syntax based on standard star schema conventions.
+        # 3. Only return the RAW T-SQL query code. Do NOT wrap it in markdown blocks (no ```sql), no explanations, and no extra characters.
+        # 4. The query must strictly be a read-only SELECT statement.
+        # """
+        
+        system_prompt = f"""
+        You are an expert Data Engineer. Your goal is to generate a valid T-SQL SELECT query for a Star Schema in the schema '{dataset_name}'.
+        
+        SCHEMA STRUCTURE:
+        {schema_context}
+        
+        YOUR RULES:
+        1. ANCHOR: The query MUST identify the relevant FACT table (the table containing IDs from multiple dimensions).
+        2. JOIN PATTERN: All DIMENSION tables must join directly to the FACT table. Do NOT join dimensions to other dimensions.
+        3. SYNTAX: Use fully qualified names: [{dataset_name}].[TableName].[ColumnName].
+        4. NO ALIASES: Do not use aliases (like 'AS f') unless necessary. 
+        5. OUTPUT: Return ONLY the raw T-SQL. No markdown, no triple backticks, no conversational text.
+        
+        Example of correct join pattern:
+        SELECT [Dim_A].[Col], [Fact_X].[Col]
+        FROM [Fact_X]
+        INNER JOIN [Dim_A] ON [Fact_X].[ID] = [Dim_A].[ID]
+        """
+        
+        user_prompt = f"Requested Columns to Join:\n" + "\n".join(selected_columns)
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.0
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Error generating join query: {e}")
             raise e
