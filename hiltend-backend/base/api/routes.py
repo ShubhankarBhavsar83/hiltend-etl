@@ -95,7 +95,6 @@ class CustomViewRequest(BaseModel):
 
 @router.post("/api/v1/datasets/{dataset_name}/custom-view", dependencies=[Security(azure_scheme)])
 def execute_custom_join_view(dataset_name: str = Path(...), payload: CustomViewRequest = ..., db: Session = Depends(get_db)):
-    """Generates and executes an AI-driven JOIN query across selected columns."""
     if not payload.columns:
         raise HTTPException(status_code=400, detail="No columns selected.")
         
@@ -115,6 +114,12 @@ def execute_custom_join_view(dataset_name: str = Path(...), payload: CustomViewR
         schema_context = ""
         for t, cols in tables_dict.items():
             schema_context += f"Table: {t}\nColumns: {', '.join(cols)}\n\n"
+            
+        # requested_tables = {col.split('.')[0] for col in payload.columns}
+        # schema_context = "\n".join([
+        #     f"Table: {t}\nColumns: {', '.join(cols)}"                         # <--------------------- Check
+        #     for t, cols in tables_dict.items() if t in requested_tables
+        # ])
 
         generated_sql = ai_service.generate_join_query(dataset_name, payload.columns, schema_context)
         
