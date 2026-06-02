@@ -92,6 +92,64 @@ class DatasetCreate(BaseModel):
     
 class CustomViewRequest(BaseModel):
     columns: list[str] # Format: ["Dim_Customer.Customer_ID", "Fact_Booking.Total_Revenue_USD"]
+    
+class NLQRequest(BaseModel):
+    prompt: str
+    selected_columns: list[str] = []
+    
+    
+@router.post("/api/v1/datasets/{dataset_name}/nlq", dependencies=[Security(azure_scheme)])
+def execute_natural_language_query(
+    dataset_name: str = Path(...), 
+    payload: NLQRequest = ..., 
+    db: Session = Depends(get_db)
+):
+    try:
+        schema_query = text("""
+            SELECT TABLE_NAME, COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME NOT LIKE 'stg_%'
+        """)
+        schema_rows = db.execute(schema_query, {"schema_name": dataset_name}).fetchall()
+        
+        if not schema_rows:
+            raise HTTPException(status_code=404, detail="Schema not found or empty.")
+
+        tables_dict = {}
+        for row in schema_rows:
+            if row[0] not in tables_dict: tables_dict[row[0]] = []
+            tables_dict[row[0]].append(row[1])
+        
+        schema_context = ""
+        for t, cols in tables_dict.items():
+            schema_context += f"Table: {t}\nColumns: {', '.join(cols)}\n\n"
+
+        final_prompt = payload.prompt
+        if payload.selected_columns:
+            cols_str = ", ".join(payload.selected_columns)
+            final_prompt = f"The user has specifically focused on these columns: {cols_str}. {payload.prompt}"
+
+        generated_sql = ai_service.generate_sql_query(final_prompt, schema_context)
+        
+        clean_sql_upper = generated_sql.upper().strip()
+        if not clean_sql_upper.startswith("SELECT"):
+            raise HTTPException(status_code=400, detail="Only SELECT queries are permitted.")
+        if any(keyword in clean_sql_upper for keyword in ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE"]):
+            raise HTTPException(status_code=400, detail="Destructive execution patterns blocked.")
+
+        result = db.execute(text(generated_sql))
+        columns = list(result.keys())
+        rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+        return {
+            "columns": columns,
+            "data": rows,
+            "sql": generated_sql
+        }
+
+    except Exception as e:
+        print(f"[NLQ Error] Execution failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Query execution failed: {str(e)}")
 
 @router.post("/api/v1/datasets/{dataset_name}/custom-view", dependencies=[Security(azure_scheme)])
 def execute_custom_join_view(dataset_name: str = Path(...), payload: CustomViewRequest = ..., db: Session = Depends(get_db)):

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
+import { NLQChatbot } from './NLQChatbot';
 import { useApiClient } from "../hooks/useApiClient";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ type TableRowData = Record<string, string | number | boolean | null>;
 
 export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const apiClient = useApiClient();
+
 
     // Pane State
     const [isSchemaOpen, setIsSchemaOpen] = useState(true);
@@ -54,6 +56,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
     };
+    
 
     const fetchSchema = useCallback(async () => {
         if (!selectedDataset) return;
@@ -89,7 +92,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const fetchTableData = async (tableName: string, page: number = 1) => {
         setIsLoadingData(true);
         setActiveTableName(tableName);
-        setCustomSelectedColumns([]); // Clear custom selection when shifting back to raw single table
+        setCustomSelectedColumns([]);
         setSortConfig(null);
 
         try {
@@ -431,8 +434,16 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                 </div>
 
                 <div className="flex-1 p-4 flex flex-col">
-                    <div className="flex-1 border-2 border-dashed border-blue-100 rounded-lg flex items-center justify-center text-blue-300 font-mono text-sm bg-white">
-                        [Data Bro]
+                    <div className="w-80 flex-shrink-0 flex flex-col h-full overflow-hidden">
+                        <NLQChatbot
+                            datasetName={selectedDataset}
+                            selectedColumns={visibleColumns}
+                            onDataResult={(data, columns) => {
+                                setActiveTableData(data);
+                                setActiveTableColumns(columns);
+                                setActiveTableName("AI Query Result");
+                            }}
+                        />
                     </div>
                 </div>
             </div>
