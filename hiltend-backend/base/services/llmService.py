@@ -87,19 +87,43 @@ class LLMService:
             raise e
       
       
-    # def generate_data_summary(self, data_sample: str) -> str:
-    #     system_prompt = """
-    #     You are an expert Data Analyst. The user has provided a JSON sample of their current data view.
-    #     Provide a concise, business insight oriented summary of this data. Identify key metrics, trends, anomalies, or interesting distributions.
-    #     Format your response cleanly using bullet points or short paragraphs. Do not echo the raw data back.
-    #     """
+    def generate_dataset_dictionary(self, dataset_name: str, schema_context: str) -> str:
+        system_prompt = f"""
+        You are an expert Data Architect. The user wants a high-level summary and explanation of the entire dataset named '{dataset_name}'.
+        
+        Based on the provided database schema (tables, columns, and data types):
+        1. Explain the core entities/tables and what kind of data they hold.
+        2. Identify the likely relationships between them (e.g., primary/foreign key links, star schema patterns).
+        3. Suggest what kind of business insights or analytics this dataset supports.
+        
+        Format your response cleanly using markdown bullet points and short paragraphs. Do not write SQL.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Schema Definition:\n{schema_context}"}
+                ],
+                temperature=0.3
+            )
+            
+            content = response.choices[0].message.content
+            if not content:
+                return "The AI returned an empty response. This is likely due to an Azure safety/content filter."
+                
+            return content.strip()
+        except Exception as e:
+            print(f"Error generating dataset summary: {e}")
+            raise e
         
     def generate_data_summary(self, dataset_name: str, data_sample: str, user_context: str = "") -> str:
         
         system_prompt = f"""
         You are an expert Data Analyst analyzing a dataset named '{dataset_name}'. 
         The user has provided a JSON sample of their current data view.
-        Provide a detailed summary of this data. Identify key metrics, trends, anomalies, or interesting distributions.
+        Provide a detailed summary of this data. 
+        Identify key metrics, trends, anomalies, or interesting distributions.
         Format your response cleanly using bullet points or short paragraphs. Do not echo the raw data back.
         """
         

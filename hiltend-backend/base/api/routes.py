@@ -115,8 +115,40 @@ def process_pipeline_background(local_path: str, safe_name: str, dataset_name: s
             os.remove(local_path)
 
     
+
+
+@router.post("/api/v1/datasets/{dataset_name}/explain-schema", dependencies=[Security(azure_scheme)])
+def explain_dataset_schema(dataset_name: str = Path(...), db: Session = Depends(get_db)):
+    try:
+        schema_query = text("""
+            SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME NOT LIKE 'stg_%'
+        """)
+        schema_rows = db.execute(schema_query, {"schema_name": dataset_name}).fetchall()
+        
+        if not schema_rows:
+            raise HTTPException(status_code=404, detail="Schema not found or empty.")
+
+        # Group columns by table
+        tables_dict = {}
+        for row in schema_rows:
+            if row[0] not in tables_dict: tables_dict[row[0]] = []
+            tables_dict[row[0]].append(f"{row[1]} ({row[2]})")
+        
+        # Build the context string
+        schema_context = ""
+        for t, cols in tables_dict.items():
+            schema_context += f"Table: {t}\nColumns: {', '.join(cols)}\n\n"
+
+        summary = ai_service.generate_dataset_dictionary(dataset_name, schema_context)
+        return {"summary": summary}
     
-    
+    except Exception as e:
+        import traceback
+        print(f"\n[Schema Explain Error] {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to explain schema: {str(e)}")
     
 @router.post("/api/v1/datasets/{dataset_name}/nlq", dependencies=[Security(azure_scheme)])
 def execute_natural_language_query(

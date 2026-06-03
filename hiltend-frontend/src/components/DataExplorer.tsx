@@ -56,6 +56,27 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [summaryText, setSummaryText] = useState<string | null>(null);
 
+    // Dataset Architect Sumarry States
+    const [isDatasetSummaryModalOpen, setIsDatasetSummaryModalOpen] = useState(false);
+    const [isDatasetSummarizing, setIsDatasetSummarizing] = useState(false);
+    const [datasetSummaryText, setDatasetSummaryText] = useState<string | null>(null);
+
+    const handleSummarizeDataset = async () => {
+        setIsDatasetSummaryModalOpen(true);
+        if (datasetSummaryText) return; // Don't re-fetch if we already have it
+
+        setIsDatasetSummarizing(true);
+        try {
+            const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/explain-schema`);
+            setDatasetSummaryText(res.data.summary);
+        } catch (err) {
+            console.error("Dataset summary failed", err);
+            setDatasetSummaryText("Failed to generate dataset architecture summary.");
+        } finally {
+            setIsDatasetSummarizing(false);
+        }
+    };
+
     // Single Table Column Visibility State
     const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
     const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
@@ -233,13 +254,32 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                 "flex flex-col bg-gray-50 border-r border-gray-200 transition-all duration-300 ease-in-out shrink-0",
                 isSchemaOpen ? "w-64" : "w-0 border-none opacity-0"
             )}>
-                <div className="h-10 px-3 flex items-center justify-between border-b border-gray-200 bg-gray-100/50 shrink-0">
+                {/* <div className="h-10 px-3 flex items-center justify-between border-b border-gray-200 bg-gray-100/50 shrink-0">
                     <span className="font-semibold text-gray-700 text-[13px] tracking-tight uppercase">Explorer</span>
                     {customSelectedColumns.length > 0 && (
                         <Button variant="ghost" className="h-6 px-1.5 text-[11px] text-gray-500" onClick={() => setCustomSelectedColumns([])}>
                             Clear ({customSelectedColumns.length})
                         </Button>
                     )}
+                </div> */}
+                <div className="h-10 px-3 flex items-center justify-between border-b border-gray-200 bg-gray-100/50 shrink-0">
+                    <span className="font-semibold text-gray-700 text-[13px] tracking-tight uppercase">Explorer</span>
+                    <div className="flex items-center gap-1">
+                        {customSelectedColumns.length > 0 && (
+                            <Button variant="ghost" className="h-6 px-1.5 text-[11px] text-gray-500" onClick={() => setCustomSelectedColumns([])}>
+                                Clear ({customSelectedColumns.length})
+                            </Button>
+                        )}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-blue-600 hover:bg-blue-100"
+                            onClick={handleSummarizeDataset}
+                            title="Summarise Entire Dataset Architecture"
+                        >
+                            <SparklesIcon />
+                        </Button>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto py-2">
@@ -456,39 +496,8 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                 </div>
             </div>
 
-            {/* RIGHT PANE: Chatbot */}
-            {/* <div className={cn(
-                "flex flex-col bg-gray-50 border-l border-gray-200 transition-all duration-300 ease-in-out shrink-0 overflow-hidden",
-                isChatOpen ? "w-80" : "w-0 border-none opacity-0"
-            )}>
-                <div className="h-10 px-3 flex items-center justify-between border-b border-gray-200 bg-blue-50/50 shrink-0">
-                    <div className="flex items-center gap-2 text-blue-700">
-                        <SparklesIcon />
-                        <span className="font-semibold text-[13px] tracking-tight">AI Assistant</span>
-                    </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-gray-600" onClick={() => setIsChatOpen(false)}>
-                        <CloseIcon />
-                    </Button>
-                </div>
 
-                    <div className="flex-1 flex flex-col min-h-0">
-                        <NLQChatbot
-                            datasetName={selectedDataset}
-                            selectedColumns={visibleColumns}
-                            onDataResult={(data, columns) => {
-                                setActiveTableData(data);
-                                setActiveTableColumns(columns);
-                                setActiveTableName("AI Query Result");
-                                setVisibleColumns(columns);
-                                setCurrentPage(1);
-                                setTotalPages(1);
-                                setTotalRecords(data.length);
-                            }}
-                        />
-                    </div>
-            </div> */}
-
-        {/* RIGHT PANE: Chatbot (Collapsible Resizable Overlay) */}
+            {/* RIGHT PANE: Chatbot (Collapsible Resizable Overlay) */}
             <div
                 className={cn(
                     "absolute right-0 top-0 bottom-0 bg-gray-50 border-gray-200 transition-all duration-300 ease-in-out z-40 shadow-2xl flex flex-col overflow-hidden",
@@ -579,6 +588,32 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                             )}
                         </div>
 
+                    </div>
+                </div>
+            )}
+
+            {isDatasetSummaryModalOpen && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-[2px] p-4">
+                    <div className="bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col max-w-2xl w-full max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50/50 shrink-0">
+                            <h3 className="font-semibold text-gray-800 flex items-center gap-2 text-[15px]">
+                                <SparklesIcon /> Dataset Architecture Summary
+                            </h3>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-600" onClick={() => setIsDatasetSummaryModalOpen(false)}>
+                                <CloseIcon />
+                            </Button>
+                        </div>
+                        <div className="p-6 flex flex-col gap-4 overflow-y-auto min-h-[200px]">
+                            {isDatasetSummarizing ? (
+                                <div className="flex items-center justify-center h-full text-blue-600 text-[13px] font-medium gap-2 animate-pulse mt-10 mb-10">
+                                    <SparklesIcon /> Analyzing table relationships and schema...
+                                </div>
+                            ) : (
+                                <div className="text-[13.5px] text-gray-700 leading-relaxed whitespace-pre-wrap font-sans">
+                                    {datasetSummaryText}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
