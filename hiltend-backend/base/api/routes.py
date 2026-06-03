@@ -8,7 +8,7 @@ from sqlalchemy import text
 from base.core.security import azure_scheme
 from base.core.config import settings
 from base.database.session import get_db, engine
-from typing import List
+from typing import List, Dict, Any
 from pydantic import BaseModel
 
 
@@ -27,8 +27,23 @@ ai_service = LLMService()
 # --- In-Memory Status for UI Progress Bar ---
 PIPELINE_STATUS = {}
 
+class SummarizeRequest(BaseModel):
+    data: List[Dict[str, Any]]
+
+def _deduplicate_columns(raw_columns: list[str]) -> list[str]:
+    """Ensures all column names are strictly unique to prevent dictionary key overwriting."""
+    columns = []
+    seen = {}
+    for col in raw_columns:
+        if col in seen:
+            seen[col] += 1
+            columns.append(f"{col}_{seen[col]}")
+        else:
+            seen[col] = 0
+            columns.append(col)
+    return columns
+
 def process_batch_sequentially(file_tasks: List[dict], dataset_name: str):
-    """Processes a batch of files one by one to prevent schema evolution race conditions."""
     for task in file_tasks:
         print(f"[Queue] Starting processing for {task['filename']}")
         process_pipeline_background(
@@ -91,11 +106,15 @@ class DatasetCreate(BaseModel):
     name: str
     
 class CustomViewRequest(BaseModel):
-    columns: list[str] # Format: ["Dim_Customer.Customer_ID", "Fact_Booking.Total_Revenue_USD"]
+    columns: list[str] 
     
 class NLQRequest(BaseModel):
     prompt: str
     selected_columns: list[str] = []
+    
+class SummarizeRequest(BaseModel):
+    data: list[dict]
+    
     
     
 @router.post("/api/v1/datasets/{dataset_name}/nlq", dependencies=[Security(azure_scheme)])
@@ -129,8 +148,8 @@ def execute_natural_language_query(
             cols_str = ", ".join(payload.selected_columns)
             final_prompt = f"The user has specifically focused on these columns: {cols_str}. {payload.prompt}"
 
-        generated_sql = ai_service.generate_sql_query(final_prompt, schema_context)
-        
+        generated_sql = ai_service.generate_sql_query(dataset_name, final_prompt, schema_context)     
+           
         clean_sql_upper = generated_sql.upper().strip()
         if not clean_sql_upper.startswith("SELECT"):
             raise HTTPException(status_code=400, detail="Only SELECT queries are permitted.")
@@ -138,7 +157,8 @@ def execute_natural_language_query(
             raise HTTPException(status_code=400, detail="Destructive execution patterns blocked.")
 
         result = db.execute(text(generated_sql))
-        columns = list(result.keys())
+        
+        columns = _deduplicate_columns(list(result.keys()))
         rows = [dict(zip(columns, row)) for row in result.fetchall()]
 
         return {
@@ -149,7 +169,31 @@ def execute_natural_language_query(
 
     except Exception as e:
         print(f"[NLQ Error] Execution failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Query execution failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail="The AI generated an invalid query or encountered a data type mismatch. Please try rephrasing your question."
+            )
+  
+
+@router.post("/api/v1/datasets/{dataset_name}/summarize", dependencies=[Security(azure_scheme)])
+def summarize_data_view(dataset_name: str = Path(...), payload: SummarizeRequest = None):
+    if not payload or not payload.data:
+        raise HTTPException(status_code=400, detail="No data provided to summarize.")
+    
+    # Aggressively cap at 15 rows to guarantee we don't hit LLM token limits
+    sample_data = payload.data
+    
+    try:
+        summary = ai_service.generate_data_summary(str(sample_data))
+        return {"summary": summary}
+    except Exception as e:
+        import traceback
+        print(f"\n[Summarize Error] {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"LLM Error: {str(e)}")
+    
+    
+
 
 @router.post("/api/v1/datasets/{dataset_name}/custom-view", dependencies=[Security(azure_scheme)])
 def execute_custom_join_view(dataset_name: str = Path(...), payload: CustomViewRequest = ..., db: Session = Depends(get_db)):
@@ -172,12 +216,6 @@ def execute_custom_join_view(dataset_name: str = Path(...), payload: CustomViewR
         schema_context = ""
         for t, cols in tables_dict.items():
             schema_context += f"Table: {t}\nColumns: {', '.join(cols)}\n\n"
-            
-        # requested_tables = {col.split('.')[0] for col in payload.columns}
-        # schema_context = "\n".join([
-        #     f"Table: {t}\nColumns: {', '.join(cols)}"                         # <--------------------- Check
-        #     for t, cols in tables_dict.items() if t in requested_tables
-        # ])
 
         generated_sql = ai_service.generate_join_query(dataset_name, payload.columns, schema_context)
         
@@ -189,7 +227,7 @@ def execute_custom_join_view(dataset_name: str = Path(...), payload: CustomViewR
 
         result = db.execute(text(generated_sql))
         
-        columns = list(result.keys())
+        columns = _deduplicate_columns(list(result.keys()))
         rows = [dict(zip(columns, row)) for row in result.fetchall()]
         
         return {
@@ -219,14 +257,12 @@ def ping_services(db: Session = Depends(get_db)):
     """Pings low-tier resources to wake them up from standby."""
     status = {"sql": "offline", "databricks": "offline"}
     
-    # Ping Azure SQL Serverless
     try:
         db.execute(text("SELECT 1"))
         status["sql"] = "awake"
     except Exception as e:
         print(f"[Ping] SQL DB Error: {e}")
         
-    # Ping Databricks Serverless/Compute
     try:
         from base.services.orchestrator import _get_workspace_client
         w = _get_workspace_client()
@@ -239,7 +275,6 @@ def ping_services(db: Session = Depends(get_db)):
 
 @router.post("/api/v1/datasets", dependencies=[Security(azure_scheme)])
 def create_dataset(payload: DatasetCreate, db: Session = Depends(get_db)):
-    """Creates a new SQL Schema to isolate the dataset."""
     schema_name = payload.name.strip().replace(" ", "_")
     try:
         db.execute(text(f"CREATE SCHEMA [{schema_name}]"))
@@ -401,7 +436,6 @@ def get_table_data(
 ):
     """Safely fetches paginated rows from a specific table."""
     try:
-        # 1. SECURITY PRE-CHECK: Validate table exists and get columns
         col_query = text("""
             SELECT COLUMN_NAME 
             FROM INFORMATION_SCHEMA.COLUMNS 
@@ -413,13 +447,11 @@ def get_table_data(
         if not valid_cols:
             raise HTTPException(status_code=404, detail="Table not found or has no columns.")
 
-        primary_col = valid_cols[0] # Required for Azure SQL Pagination
+        primary_col = valid_cols[0]
 
-        # 2. Get total record count for frontend pagination math
         count_query = text(f"SELECT COUNT(*) FROM [{dataset_name}].[{table_name}]")
         total_records = db.execute(count_query).scalar()
 
-        # 3. Safe Paginated Fetch
         offset = (page - 1) * page_size
         query = text(f"""
             SELECT * FROM [{dataset_name}].[{table_name}]
@@ -429,7 +461,7 @@ def get_table_data(
         
         result = db.execute(query, {"offset": offset, "page_size": page_size})
         
-        columns = list(result.keys())
+        columns = _deduplicate_columns(list(result.keys()))
         rows = [dict(zip(columns, row)) for row in result.fetchall()]
         
         return {

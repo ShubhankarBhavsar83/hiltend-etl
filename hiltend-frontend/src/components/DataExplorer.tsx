@@ -49,6 +49,9 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const [totalPages, setTotalPages] = useState(1);
     const [totalRecords, setTotalRecords] = useState(0);
 
+    const [isSummarizing, setIsSummarizing] = useState(false);
+    const [summaryText, setSummaryText] = useState<string | null>(null);
+
     // Single Table Column Visibility State
     const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
     const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
@@ -56,7 +59,23 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
     };
-    
+
+
+    const handleSummarize = async () => {
+        if (activeTableData.length === 0) return;
+        setIsSummarizing(true);
+        try {
+            const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/summarize`, {
+                data: activeTableData
+            });
+            setSummaryText(res.data.summary);
+        } catch (err) {
+            console.error("Summary failed", err);
+            setSummaryText("Failed to generate summary. Please try again.");
+        } finally {
+            setIsSummarizing(false);
+        }
+    };
 
     const fetchSchema = useCallback(async () => {
         if (!selectedDataset) return;
@@ -326,6 +345,18 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                             </div>
                         )}
 
+                        {activeTableColumns.length > 0 && (
+                            <Button
+                                onClick={handleSummarize}
+                                disabled={isSummarizing || activeTableData.length === 0}
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-[12px] flex gap-1.5 items-center bg-green-50/50 text-green-700 hover:bg-green-100 border-green-200 transition-colors"
+                            >
+                                {isSummarizing ? "Summarizing..." : "Summarise Results"}
+                            </Button>
+                        )}
+
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-600 hover:bg-blue-50 rounded-sm" onClick={() => setIsChatOpen(!isChatOpen)}>
                             <SparklesIcon />
                         </Button>
@@ -419,8 +450,12 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
             </div>
 
             {/* RIGHT PANE: Chatbot */}
-            <div className={cn(
+            {/* <div className={cn(
                 "flex flex-col bg-gray-50 border-l border-gray-200 transition-all duration-300 ease-in-out shrink-0",
+                isChatOpen ? "w-80" : "w-0 border-none opacity-0"
+            )}> */}
+            <div className={cn(
+                "flex flex-col bg-gray-50 border-l border-gray-200 transition-all duration-300 ease-in-out shrink-0 overflow-hidden",
                 isChatOpen ? "w-80" : "w-0 border-none opacity-0"
             )}>
                 <div className="h-10 px-3 flex items-center justify-between border-b border-gray-200 bg-blue-50/50 shrink-0">
@@ -442,11 +477,34 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                 setActiveTableData(data);
                                 setActiveTableColumns(columns);
                                 setActiveTableName("AI Query Result");
+                                setVisibleColumns(columns);
+                                setCurrentPage(1);
+                                setTotalPages(1);
+                                setTotalRecords(data.length);
+                                // -------------------------
                             }}
                         />
                     </div>
                 </div>
             </div>
+
+            {summaryText && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/30 backdrop-blur-[2px] p-4">
+                    <div className="bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col max-w-2xl w-full max-h-[80vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50/50">
+                            <h3 className="font-semibold text-gray-800 flex items-center gap-2 text-[15px]">
+                                <SparklesIcon /> High-Level Data Summary
+                            </h3>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-600" onClick={() => setSummaryText(null)}>
+                                <CloseIcon />
+                            </Button>
+                        </div>
+                        <div className="p-6 overflow-y-auto text-[13.5px] text-gray-700 leading-relaxed whitespace-pre-wrap font-sans">
+                            {summaryText}
+                        </div>
+                    </div>
+                </div>
+            )}
 
         </div>
     );

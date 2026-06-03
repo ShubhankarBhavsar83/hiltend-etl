@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2 } from 'lucide-react';
 import { useApiClient } from '../hooks/useApiClient';
 import axios from 'axios';
@@ -23,6 +23,8 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [prevColsString, setPrevColsString] = useState('');
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
 
     const currentColsString = selectedColumns.join(', ');
     if (currentColsString !== prevColsString) {
@@ -33,6 +35,10 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
                 : ''
         );
     }
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages, isLoading]);
 
     const handleSend = async () => {
         if (!input.trim() || !datasetName) return;
@@ -72,6 +78,7 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
         }
     };
 
+
     return (
         <div className="flex flex-col h-full bg-white border-l">
             <div className="p-4 border-b bg-gray-50 flex items-center gap-2">
@@ -79,7 +86,7 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
                 <h3 className="font-semibold text-gray-800">AI Query Assistant</h3>
             </div>
 
-            <div className="flex-1 p-4 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 p-4 overflow-y-auto space-y-4">
                 {messages.map((msg, idx) => (
                     <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                         {msg.role === 'assistant' && (
@@ -89,12 +96,11 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
                         )}
 
                         <div className={`p-3 rounded-lg text-sm shadow-sm ${msg.role === 'user'
-                                ? 'bg-blue-600 text-white max-w-[85%]'
-                                : 'bg-gray-100 text-gray-800 max-w-[95%]'
+                            ? 'bg-blue-600 text-white max-w-[85%]'
+                            : 'bg-gray-100 text-gray-800 max-w-[95%]'
                             }`}>
                             <span className="whitespace-pre-wrap font-sans break-words">{msg.text}</span>
 
-                            {/* <-- Dedicated UI Block for SQL Query Display --> */}
                             {msg.sql && (
                                 <div className="mt-3 p-3 bg-slate-900 text-slate-50 font-mono text-xs rounded-md border border-slate-700 overflow-x-auto shadow-inner">
                                     <pre>{msg.sql}</pre>
@@ -120,6 +126,9 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
                         </div>
                     </div>
                 )}
+
+                {/* Added auto-scroll anchor */}
+                <div ref={messagesEndRef} />
             </div>
 
             <div className="p-4 border-t bg-gray-50">

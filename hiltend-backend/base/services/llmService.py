@@ -85,18 +85,48 @@ class LLMService:
         except Exception as e:
             print(f"Error generating relational mapping: {e}")
             raise e
-        
-    def generate_sql_query(self, user_question: str, db_schema_context: str) -> str:
+      
+      
+    def generate_data_summary(self, data_sample: str) -> str:
+        system_prompt = """
+        You are an expert Data Analyst. The user has provided a JSON sample of their current data view.
+        Provide a concise, business insight oriented summary of this data. Identify key metrics, trends, anomalies, or interesting distributions.
+        Format your response cleanly using bullet points or short paragraphs. Do not echo the raw data back.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Data Sample:\n{data_sample}"}
+                ],
+                temperature=0.3
+            )
+            
+            content = response.choices[0].message.content
+            if not content:
+                return "The AI returned an empty response. This is likely due to an Azure safety/content filter."
+                
+            return content.strip()
+        except Exception as e:
+            print(f"Error generating summary: {e}")
+            raise e      
+  
+    def generate_sql_query(self, dataset_name: str, user_question: str, db_schema_context: str) -> str:
 
         system_prompt = f"""
         You are an expert Azure SQL Database Architect. 
         Translate the user's question into purely valid T-SQL.
         Output ONLY the raw SQL query. Do not use markdown blocks (e.g., ```sql).
         
+        CRITICAL RULES:
+        1. TABLE NAMES: You MUST fully qualify ALL table names using the schema '{dataset_name}'. 
+           Format: [{dataset_name}].[TableName]
+        2. DATES: Dates are often stored as string types (e.g., 'YYYY-MM-DD'). Use appropriate T-SQL conversion functions (like TRY_CAST(column AS DATE) or substring logic) when filtering or comparing dates.
+        
         Here is the current schema for the dataset:
         {db_schema_context}
         """
-
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
