@@ -87,12 +87,24 @@ class LLMService:
             raise e
       
       
-    def generate_data_summary(self, data_sample: str) -> str:
-        system_prompt = """
-        You are an expert Data Analyst. The user has provided a JSON sample of their current data view.
-        Provide a concise, business insight oriented summary of this data. Identify key metrics, trends, anomalies, or interesting distributions.
+    # def generate_data_summary(self, data_sample: str) -> str:
+    #     system_prompt = """
+    #     You are an expert Data Analyst. The user has provided a JSON sample of their current data view.
+    #     Provide a concise, business insight oriented summary of this data. Identify key metrics, trends, anomalies, or interesting distributions.
+    #     Format your response cleanly using bullet points or short paragraphs. Do not echo the raw data back.
+    #     """
+        
+    def generate_data_summary(self, dataset_name: str, data_sample: str, user_context: str = "") -> str:
+        
+        system_prompt = f"""
+        You are an expert Data Analyst analyzing a dataset named '{dataset_name}'. 
+        The user has provided a JSON sample of their current data view.
+        Provide a detailed summary of this data. Identify key metrics, trends, anomalies, or interesting distributions.
         Format your response cleanly using bullet points or short paragraphs. Do not echo the raw data back.
         """
+        
+        if user_context:
+            system_prompt += f"\n\nCRITICAL USER INSTRUCTIONS TO FOCUS ON:\n{user_context}"
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment_name,

@@ -8,7 +8,7 @@ from sqlalchemy import text
 from base.core.security import azure_scheme
 from base.core.config import settings
 from base.database.session import get_db, engine
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
 
@@ -27,8 +27,21 @@ ai_service = LLMService()
 # --- In-Memory Status for UI Progress Bar ---
 PIPELINE_STATUS = {}
 
+
+# --- Dataset Management Endpoints ---
+class DatasetCreate(BaseModel):
+    name: str
+    
+class CustomViewRequest(BaseModel):
+    columns: list[str] 
+    
+class NLQRequest(BaseModel):
+    prompt: str
+    selected_columns: list[str] = []
+    
 class SummarizeRequest(BaseModel):
     data: List[Dict[str, Any]]
+    user_context: Optional[str] = None
 
 def _deduplicate_columns(raw_columns: list[str]) -> list[str]:
     """Ensures all column names are strictly unique to prevent dictionary key overwriting."""
@@ -101,19 +114,7 @@ def process_pipeline_background(local_path: str, safe_name: str, dataset_name: s
         if os.path.exists(local_path):
             os.remove(local_path)
 
-# --- Dataset Management Endpoints ---
-class DatasetCreate(BaseModel):
-    name: str
     
-class CustomViewRequest(BaseModel):
-    columns: list[str] 
-    
-class NLQRequest(BaseModel):
-    prompt: str
-    selected_columns: list[str] = []
-    
-class SummarizeRequest(BaseModel):
-    data: list[dict]
     
     
     
@@ -175,16 +176,32 @@ def execute_natural_language_query(
             )
   
 
+# @router.post("/api/v1/datasets/{dataset_name}/summarize", dependencies=[Security(azure_scheme)])
+# def summarize_data_view(dataset_name: str = Path(...), payload: SummarizeRequest = None):
+#     if not payload or not payload.data:
+#         raise HTTPException(status_code=400, detail="No data provided to summarize.")
+    
+#     sample_data = payload.data[:15]
+    
+#     try:
+#         summary = ai_service.generate_data_summary(str(sample_data), payload.user_context or "")
+#         return {"summary": summary}
+#     except Exception as e:
+#         import traceback
+#         print(f"\n[Summarize Error] {str(e)}")
+#         traceback.print_exc()
+#         raise HTTPException(status_code=500, detail=f"LLM Error: {str(e)}")
+    
 @router.post("/api/v1/datasets/{dataset_name}/summarize", dependencies=[Security(azure_scheme)])
 def summarize_data_view(dataset_name: str = Path(...), payload: SummarizeRequest = None):
     if not payload or not payload.data:
         raise HTTPException(status_code=400, detail="No data provided to summarize.")
     
-    # Aggressively cap at 15 rows to guarantee we don't hit LLM token limits
-    sample_data = payload.data
+    sample_data = payload.data[:100]
     
     try:
-        summary = ai_service.generate_data_summary(str(sample_data))
+        # --> Update this line to pass dataset_name as the first argument <--
+        summary = ai_service.generate_data_summary(dataset_name, str(sample_data), payload.user_context or "")
         return {"summary": summary}
     except Exception as e:
         import traceback

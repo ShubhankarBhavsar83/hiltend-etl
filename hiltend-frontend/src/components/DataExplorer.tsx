@@ -27,6 +27,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     // Pane State
     const [isSchemaOpen, setIsSchemaOpen] = useState(true);
     const [isChatOpen, setIsChatOpen] = useState(false);
+    const [isChatExpanded, setIsChatExpanded] = useState(false);
 
     // Schema State
     const [tables, setTables] = useState<TableDef[]>([]);
@@ -49,6 +50,9 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const [totalPages, setTotalPages] = useState(1);
     const [totalRecords, setTotalRecords] = useState(0);
 
+    // Summary States
+    const [isSummarizeModalOpen, setIsSummarizeModalOpen] = useState(false);
+    const [summaryContextInput, setSummaryContextInput] = useState("");
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [summaryText, setSummaryText] = useState<string | null>(null);
 
@@ -61,12 +65,13 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     };
 
 
-    const handleSummarize = async () => {
+    const handleExecuteSummary = async () => {
         if (activeTableData.length === 0) return;
         setIsSummarizing(true);
         try {
             const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/summarize`, {
-                data: activeTableData
+                data: activeTableData,
+                user_context: summaryContextInput.trim()
             });
             setSummaryText(res.data.summary);
         } catch (err) {
@@ -75,6 +80,12 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         } finally {
             setIsSummarizing(false);
         }
+    };
+
+    const closeSummaryModal = () => {
+        setIsSummarizeModalOpen(false);
+        setSummaryText(null);
+        setSummaryContextInput("");
     };
 
     const fetchSchema = useCallback(async () => {
@@ -99,7 +110,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         fetchSchema();
     }, [fetchSchema]);
 
-    // Handler for checking/unchecking specific columns across tables
     const handleColumnCheckboxChange = (tableName: string, columnName: string) => {
         const uniqueKey = `${tableName}.${columnName}`;
         setCustomSelectedColumns(prev =>
@@ -107,7 +117,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         );
     };
 
-    // Route 1: Standard Single Table View (Via Eye Icon)
     const fetchTableData = async (tableName: string, page: number = 1) => {
         setIsLoadingData(true);
         setActiveTableName(tableName);
@@ -138,7 +147,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         }
     };
 
-    // Route 2: Multi-Table Custom Join View (Via Action Button)
     const handleExecuteCustomView = async () => {
         if (customSelectedColumns.length === 0) return;
         setIsLoadingData(true);
@@ -146,7 +154,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         setSortConfig(null);
 
         try {
-            // Send raw JSON object, not FormData
             const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/custom-view`, {
                 columns: customSelectedColumns
             });
@@ -347,13 +354,13 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
 
                         {activeTableColumns.length > 0 && (
                             <Button
-                                onClick={handleSummarize}
-                                disabled={isSummarizing || activeTableData.length === 0}
+                                onClick={() => setIsSummarizeModalOpen(true)}
+                                disabled={activeTableData.length === 0}
                                 variant="outline"
                                 size="sm"
                                 className="h-7 text-[12px] flex gap-1.5 items-center bg-green-50/50 text-green-700 hover:bg-green-100 border-green-200 transition-colors"
                             >
-                                {isSummarizing ? "Summarizing..." : "Summarise Results"}
+                                Summarise Results
                             </Button>
                         )}
 
@@ -451,10 +458,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
 
             {/* RIGHT PANE: Chatbot */}
             {/* <div className={cn(
-                "flex flex-col bg-gray-50 border-l border-gray-200 transition-all duration-300 ease-in-out shrink-0",
-                isChatOpen ? "w-80" : "w-0 border-none opacity-0"
-            )}> */}
-            <div className={cn(
                 "flex flex-col bg-gray-50 border-l border-gray-200 transition-all duration-300 ease-in-out shrink-0 overflow-hidden",
                 isChatOpen ? "w-80" : "w-0 border-none opacity-0"
             )}>
@@ -468,8 +471,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                     </Button>
                 </div>
 
-                <div className="flex-1 p-4 flex flex-col">
-                    <div className="w-80 flex-shrink-0 flex flex-col h-full overflow-hidden">
+                    <div className="flex-1 flex flex-col min-h-0">
                         <NLQChatbot
                             datasetName={selectedDataset}
                             selectedColumns={visibleColumns}
@@ -481,27 +483,102 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                 setCurrentPage(1);
                                 setTotalPages(1);
                                 setTotalRecords(data.length);
-                                // -------------------------
+                            }}
+                        />
+                    </div>
+            </div> */}
+
+        {/* RIGHT PANE: Chatbot (Collapsible Resizable Overlay) */}
+            <div
+                className={cn(
+                    "absolute right-0 top-0 bottom-0 bg-gray-50 border-gray-200 transition-all duration-300 ease-in-out z-40 shadow-2xl flex flex-col overflow-hidden",
+                    // When open, add the border and fade in. When closed, shrink to 0, remove border, fade out, and disable clicks.
+                    isChatOpen ? "border-l opacity-100" : "w-0 border-none opacity-0 pointer-events-none"
+                )}
+                // CRITICAL FIX: Only apply the inline width style if the chat is OPEN.
+                // If closed, this returns undefined, allowing Tailwind's 'w-0' class to take over and shrink it.
+                style={isChatOpen ? {
+                    width: isChatExpanded ? '600px' : '320px',
+                    ...(isChatExpanded ? { resize: 'horizontal', direction: 'rtl', minWidth: '320px', maxWidth: '85vw' } : {})
+                } : undefined}
+            >
+                {/* Inner wrapper resets direction to LTR so content doesn't flip backwards */}
+                <div style={{ direction: 'ltr' }} className="flex flex-col h-full w-full min-w-[320px] pointer-events-auto">
+                    <div className="h-10 px-3 flex items-center justify-between border-b border-gray-200 bg-blue-50/50 shrink-0">
+                        <div className="flex items-center gap-2 text-blue-700">
+                            <SparklesIcon />
+                            <span className="font-semibold text-[13px] tracking-tight">AI Assistant</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-gray-600" onClick={() => setIsChatExpanded(!isChatExpanded)} title={isChatExpanded ? "Shrink Window" : "Expand & Resize"}>
+                                {isChatExpanded ? <ShrinkIcon /> : <ExpandIcon />}
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-gray-600" onClick={() => setIsChatOpen(false)}>
+                                <CloseIcon />
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 flex flex-col min-h-0 w-full">
+                        <NLQChatbot
+                            datasetName={selectedDataset}
+                            selectedColumns={visibleColumns}
+                            onDataResult={(data, columns) => {
+                                setActiveTableData(data);
+                                setActiveTableColumns(columns);
+                                setActiveTableName("AI Query Result");
+                                setVisibleColumns(columns);
+                                setCurrentPage(1);
+                                setTotalPages(1);
+                                setTotalRecords(data.length);
                             }}
                         />
                     </div>
                 </div>
             </div>
 
-            {summaryText && (
-                <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/30 backdrop-blur-[2px] p-4">
-                    <div className="bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col max-w-2xl w-full max-h-[80vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50/50">
+            {isSummarizeModalOpen && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-[2px] p-4">
+                    <div className="bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col max-w-2xl w-full max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50/50 shrink-0">
                             <h3 className="font-semibold text-gray-800 flex items-center gap-2 text-[15px]">
-                                <SparklesIcon /> High-Level Data Summary
+                                <SparklesIcon /> Data Summary Configuration
                             </h3>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-600" onClick={() => setSummaryText(null)}>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-600" onClick={closeSummaryModal}>
                                 <CloseIcon />
                             </Button>
                         </div>
-                        <div className="p-6 overflow-y-auto text-[13.5px] text-gray-700 leading-relaxed whitespace-pre-wrap font-sans">
-                            {summaryText}
+
+                        <div className="p-5 flex flex-col gap-4 overflow-y-auto">
+                            <div className="flex flex-col gap-2">
+                                <label className="text-[13px] font-medium text-gray-700">
+                                    Specific Instructions (Optional)
+                                </label>
+                                <textarea
+                                    className="w-full h-20 p-3 border border-gray-200 rounded-md text-[13px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
+                                    placeholder="e.g., 'Focus entirely on revenue drops in Q3', or 'Highlight anomalies in age distribution...'"
+                                    value={summaryContextInput}
+                                    onChange={(e) => setSummaryContextInput(e.target.value)}
+                                    disabled={isSummarizing}
+                                />
+                            </div>
+
+                            <Button
+                                onClick={handleExecuteSummary}
+                                disabled={isSummarizing}
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-sm h-9 text-[13px]"
+                            >
+                                {isSummarizing ? "Analyzing Data..." : "Generate AI Summary"}
+                            </Button>
+
+                            {summaryText && (
+                                <div className="mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-lg text-[13.5px] text-gray-700 leading-relaxed whitespace-pre-wrap font-sans">
+                                    {summaryText}
+                                </div>
+                            )}
                         </div>
+
                     </div>
                 </div>
             )}
@@ -555,6 +632,24 @@ const PanelLeftIcon = () => (
 const SparklesIcon = () => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+    </svg>
+);
+
+const ExpandIcon = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="15 3 21 3 21 9" />
+        <polyline points="9 21 3 21 3 15" />
+        <line x1="21" y1="3" x2="14" y2="10" />
+        <line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+);
+
+const ShrinkIcon = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="4 14 10 14 10 20" />
+        <polyline points="20 10 14 10 14 4" />
+        <line x1="14" y1="10" x2="21" y2="3" />
+        <line x1="3" y1="21" x2="10" y2="14" />
     </svg>
 );
 

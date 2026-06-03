@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Loader2, Copy, RefreshCw } from 'lucide-react';
 import { useApiClient } from '../hooks/useApiClient';
 import axios from 'axios';
 
@@ -12,7 +12,7 @@ interface NLQChatbotProps {
 interface Message {
     role: 'user' | 'assistant';
     text: string;
-    sql?: string; // <-- Added a dedicated SQL field
+    sql?: string;
 }
 
 export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQChatbotProps) {
@@ -22,30 +22,34 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [prevColsString, setPrevColsString] = useState('');
+    // const [prevColsString, setPrevColsString] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
 
-    const currentColsString = selectedColumns.join(', ');
-    if (currentColsString !== prevColsString) {
-        setPrevColsString(currentColsString);
-        setInput(
-            selectedColumns.length > 0
-                ? `Show me data involving these columns: ${currentColsString}`
-                : ''
-        );
-    }
+    // const currentColsString = selectedColumns.join(', ');
+    // if (currentColsString !== prevColsString) {
+    //     setPrevColsString(currentColsString);
+    //     setInput(
+    //         selectedColumns.length > 0
+    //             ? `Show me data involving these columns: ${currentColsString}`
+    //             : ''
+    //     );
+    // }
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, isLoading]);
 
-    const handleSend = async () => {
-        if (!input.trim() || !datasetName) return;
+    const handleCopy = (text: string) => {
+        navigator.clipboard.writeText(text);
+    };
 
-        const userMsg = input;
+const handleSend = async (overrideText?: string | React.MouseEvent) => {
+        const userMsg = typeof overrideText === 'string' ? overrideText : input;
+        if (!userMsg.trim() || !datasetName) return;
+
         setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
-        setInput('');
+        if (typeof overrideText !== 'string') setInput('');
         setIsLoading(true);
 
         try {
@@ -95,14 +99,30 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
                             </div>
                         )}
 
-                        <div className={`p-3 rounded-lg text-sm shadow-sm ${msg.role === 'user'
+                        <div className={`relative group p-3 rounded-lg text-sm shadow-sm ${msg.role === 'user'
                             ? 'bg-blue-600 text-white max-w-[85%]'
                             : 'bg-gray-100 text-gray-800 max-w-[95%]'
                             }`}>
+
+                            {/* Hover Actions (Copy / Re-run) */}
+                            <div className={`absolute -top-3 ${msg.role === 'user' ? '-left-2' : '-right-2'} hidden group-hover:flex gap-1 bg-white border border-gray-200 shadow-sm rounded-md p-1 z-10 text-gray-500`}>
+                                <button onClick={() => handleCopy(msg.text)} className="hover:text-blue-600 transition-colors" title="Copy message">
+                                    <Copy size={13} />
+                                </button>
+                                {msg.role === 'user' && (
+                                    <button onClick={() => handleSend(msg.text)} className="hover:text-blue-600 transition-colors" title="Re-run prompt">
+                                        <RefreshCw size={13} />
+                                    </button>
+                                )}
+                            </div>
+
                             <span className="whitespace-pre-wrap font-sans break-words">{msg.text}</span>
 
                             {msg.sql && (
-                                <div className="mt-3 p-3 bg-slate-900 text-slate-50 font-mono text-xs rounded-md border border-slate-700 overflow-x-auto shadow-inner">
+                                <div className="mt-3 p-3 bg-slate-900 text-slate-50 font-mono text-xs rounded-md border border-slate-700 overflow-x-auto shadow-inner relative group/sql">
+                                    <button onClick={() => handleCopy(msg.sql || '')} className="absolute top-2 right-2 hidden group-hover/sql:block p-1 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors" title="Copy SQL">
+                                        <Copy size={12} />
+                                    </button>
                                     <pre>{msg.sql}</pre>
                                 </div>
                             )}
