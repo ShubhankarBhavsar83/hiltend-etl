@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-    # Only trigger when the frontend or this workflow file is modified
     paths:
       - 'hiltend-frontend/**'
       - '.github/workflows/**'
@@ -12,12 +11,10 @@ on:
     types: [opened, synchronize, reopened, closed]
     branches:
       - main
-    # Only trigger when the frontend or this workflow file is modified
     paths:
       - 'hiltend-frontend/**'
       - '.github/workflows/**'
 
-# Instantly cancel older in-progress builds if a newer commit is pushed
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -31,7 +28,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          submodules: false # Disabled to save fetch time
+          submodules: false
           lfs: false
           
       - name: Setup Node.js
@@ -62,7 +59,7 @@ jobs:
           action: "upload"
           app_location: "./hiltend-frontend/dist"
           output_location: ""
-          skip_app_build: true # Tells Azure Oryx to skip building and just upload the 'dist' folder
+          skip_app_build: true
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
