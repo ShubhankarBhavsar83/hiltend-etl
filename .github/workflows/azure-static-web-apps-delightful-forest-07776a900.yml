@@ -60,8 +60,8 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_DELIGHTFUL_FOREST_07776A900 }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
-          app_location: "./hiltend-frontend"
-          output_location: "dist"
+          app_location: "./hiltend-frontend/dist"
+          output_location: ""
           skip_app_build: true # Tells Azure Oryx to skip building and just upload the 'dist' folder
 
   close_pull_request_job:
