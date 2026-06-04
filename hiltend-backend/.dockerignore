@@ -1,7 +1,7 @@
 
-hiltend-backend/ops-guide
-hiltend-backend/data
-hiltend-backend/base/spark_jobs
+ops-guide/
+data/
+base/spark_jobs/
 
 # Virtual Environments (CRITICAL)
 .venv/

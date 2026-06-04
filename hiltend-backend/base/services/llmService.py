@@ -160,6 +160,7 @@ class LLMService:
         1. TABLE NAMES: You MUST fully qualify ALL table names using the schema '{dataset_name}'. 
            Format: [{dataset_name}].[TableName]
         2. DATES: Dates are often stored as string types (e.g., 'YYYY-MM-DD'). Use appropriate T-SQL conversion functions (like TRY_CAST(column AS DATE) or substring logic) when filtering or comparing dates.
+        3. NO STANDALONE ORDER BY (CRITICAL): You MUST NOT include an ORDER BY clause unless you are also using the TOP keyword (e.g., SELECT TOP 10 ... ORDER BY ...). A standalone ORDER BY clause will crash the downstream pagination wrapper.
         
         Here is the current schema for the dataset:
         {db_schema_context}
@@ -199,7 +200,9 @@ class LLMService:
         2. JOIN PATTERN: All DIMENSION tables must join directly to the FACT table. Do NOT join dimensions to other dimensions.
         3. SYNTAX: Use fully qualified names: [{dataset_name}].[TableName].[ColumnName].
         4. ALIAS DUPLICATES (CRITICAL): If the user selects columns with the exact same name from different tables (e.g., 'repo_id' from Dim_Time and 'repo_id' from Dim_Repository), you MUST alias them in the SELECT clause to guarantee unique column names (e.g., SELECT [Dim_Time].[repo_id] AS [Dim_Time_repo_id]). Un-aliased duplicates will crash the downstream pagination CTE.
-        5. OUTPUT: Return ONLY the raw T-SQL. No markdown, no triple backticks, no conversational text.
+        5. NO ORDER BY (CRITICAL): You MUST NOT include an ORDER BY clause. It will crash the downstream pagination wrapper.
+        6. OUTPUT: Return ONLY the raw T-SQL. No markdown, no triple backticks, no conversational text.
+        7. Do NOT include additional tables / columns which are not relevant to the request of the user.
         
         Example of correct join pattern with aliasing:
         SELECT [Dim_A].[ID] AS [Dim_A_ID], [Dim_B].[ID] AS [Dim_B_ID], [Fact_X].[Metric]

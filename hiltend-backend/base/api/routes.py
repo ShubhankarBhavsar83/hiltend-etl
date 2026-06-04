@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import shutil
 from fastapi import APIRouter, Depends, Query, Security, UploadFile, Form, File, Path, BackgroundTasks, HTTPException
@@ -41,6 +42,7 @@ class NLQRequest(BaseModel):
     
 class SummarizeRequest(BaseModel):
     data: List[Dict[str, Any]]
+    # sql : str
     user_context: Optional[str] = None
     
 class QueryExecutionRequest(BaseModel):
@@ -51,7 +53,10 @@ def _execute_and_paginate(db: Session, sql: str, page: int, page_size: int):
     clean_sql_upper = sql.upper().strip()
     if not clean_sql_upper.startswith("SELECT"):
         raise HTTPException(status_code=400, detail="Only SELECT queries are permitted.")
-    if any(keyword in clean_sql_upper for keyword in ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE"]):
+        
+    # <-- UPDATED: Use regex word boundaries to prevent false positives on columns like 'updated_at'
+    destructive_pattern = re.compile(r'\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE)\b')
+    if destructive_pattern.search(clean_sql_upper):
         raise HTTPException(status_code=400, detail="Destructive execution patterns blocked.")
 
     count_query = text(f"SELECT COUNT(*) FROM ({sql}) AS SubQ")
@@ -238,25 +243,7 @@ def execute_natural_language_query(
             cols_str = ", ".join(payload.selected_columns)
             final_prompt = f"The user has specifically focused on these columns: {cols_str}. {payload.prompt}"
 
-        # generated_sql = ai_service.generate_sql_query(dataset_name, final_prompt, schema_context)
         generated_sql = ai_service.generate_sql_query(dataset_name, final_prompt, schema_context) 
-           
-        clean_sql_upper = generated_sql.upper().strip()
-        if not clean_sql_upper.startswith("SELECT"):
-            raise HTTPException(status_code=400, detail="Only SELECT queries are permitted.")
-        if any(keyword in clean_sql_upper for keyword in ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE"]):
-            raise HTTPException(status_code=400, detail="Destructive execution patterns blocked.")
-
-        result = db.execute(text(generated_sql))
-        
-        columns = _deduplicate_columns(list(result.keys()))
-        rows = [dict(zip(columns, row)) for row in result.fetchall()]
-
-        # return {
-        #     "columns": columns,
-        #     "data": rows,
-        #     "sql": generated_sql
-        # }
         
         return _execute_and_paginate(db, generated_sql, page, page_size)
 
@@ -285,16 +272,19 @@ def execute_natural_language_query(
 #         raise HTTPException(status_code=500, detail=f"LLM Error: {str(e)}")
     
 @router.post("/api/v1/datasets/{dataset_name}/summarize", dependencies=[Security(azure_scheme)])
-def summarize_data_view(dataset_name: str = Path(...), payload: SummarizeRequest = None):
+def summarize_data_view(
+    dataset_name: str = Path(...), 
+    payload: SummarizeRequest = ..., 
+):
     if not payload or not payload.data:
         raise HTTPException(status_code=400, detail="No data provided to summarize.")
     
     sample_data = payload.data[:100]
     
     try:
-        # --> Update this line to pass dataset_name as the first argument <--
         summary = ai_service.generate_data_summary(dataset_name, str(sample_data), payload.user_context or "")
         return {"summary": summary}
+        
     except Exception as e:
         import traceback
         print(f"\n[Summarize Error] {str(e)}")
@@ -332,25 +322,8 @@ def execute_custom_join_view(
         for t, cols in tables_dict.items():
             schema_context += f"Table: {t}\nColumns: {', '.join(cols)}\n\n"
 
-        # generated_sql = ai_service.generate_join_query(dataset_name, payload.columns, schema_context)
         generated_sql = ai_service.generate_join_query(dataset_name, payload.columns, schema_context)
         
-        clean_sql_upper = generated_sql.upper().strip()
-        if not clean_sql_upper.startswith("SELECT"):
-            raise HTTPException(status_code=400, detail="Generated query violated safety policies.")
-        if any(keyword in clean_sql_upper for keyword in ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE"]):
-            raise HTTPException(status_code=400, detail="Destructive execution patterns blocked.")
-
-        result = db.execute(text(generated_sql))
-        
-        columns = _deduplicate_columns(list(result.keys()))
-        rows = [dict(zip(columns, row)) for row in result.fetchall()]
-        
-        # return {
-        #     "columns": columns,
-        #     "data": rows,
-        #     "sql": generated_sql
-        # }
         return _execute_and_paginate(db, generated_sql, page, page_size)
         
     except Exception as e:

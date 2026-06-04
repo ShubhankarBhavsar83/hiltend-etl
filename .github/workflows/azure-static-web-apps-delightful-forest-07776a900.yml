@@ -4,10 +4,23 @@ on:
   push:
     branches:
       - main
+    # Only trigger when the frontend or this workflow file is modified
+    paths:
+      - 'hiltend-frontend/**'
+      - '.github/workflows/**'
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches:
       - main
+    # Only trigger when the frontend or this workflow file is modified
+    paths:
+      - 'hiltend-frontend/**'
+      - '.github/workflows/**'
+
+# Instantly cancel older in-progress builds if a newer commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build_and_deploy_job:
@@ -15,29 +28,41 @@ jobs:
     runs-on: ubuntu-latest
     name: Build and Deploy Job
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: false # Disabled to save fetch time
           lfs: false
-      - name: Build And Deploy
-        id: builddeploy
-        uses: Azure/static-web-apps-deploy@v1
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_DELIGHTFUL_FOREST_07776A900 }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for Github integrations (i.e. PR comments)
-          action: "upload"
-          ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
-          # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
-          app_location: "./hiltend-frontend" # App source code path
-          api_location: "" # Api source code path - optional
-          output_location: "dist" # Built app content directory - optional
-          ###### End of Repository/Build Configurations ######
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './hiltend-frontend/package-lock.json'
+
+      - name: Build Frontend
+        working-directory: ./hiltend-frontend
+        run: |
+          npm ci
+          npm run build
         env:
           VITE_AZURE_TENANT_ID: ${{ vars.VITE_AZURE_TENANT_ID_GH }}
           VITE_AZURE_CLIENT_ID: ${{ vars.VITE_AZURE_CLIENT_ID_GH }}
           VITE_BACKEND_CLIENT_ID: ${{ vars.VITE_BACKEND_CLIENT_ID_GH }} 
           VITE_API_BASE_URL: "https://backend-contianer-hiltend-four.blueplant-536c9b02.centralindia.azurecontainerapps.io"
           VITE_ASWA_FRONTEND_URL: ${{ vars.VITE_ASWA_FRONTEND_URL_GH }}
+
+      - name: Deploy to Azure Static Web Apps
+        id: builddeploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_DELIGHTFUL_FOREST_07776A900 }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "./hiltend-frontend"
+          output_location: "dist"
+          skip_app_build: true # Tells Azure Oryx to skip building and just upload the 'dist' folder
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
