@@ -3,10 +3,18 @@ import { Send, Bot, User, Loader2, Copy, RefreshCw } from 'lucide-react';
 import { useApiClient } from '../hooks/useApiClient';
 import axios from 'axios';
 
+export interface PaginationData {
+    total_records: number;
+    current_page: number;
+    page_size: number;
+    total_pages: number;
+}
+
 interface NLQChatbotProps {
     datasetName: string;
     selectedColumns: string[];
-    onDataResult: (data: Record<string, string | number | boolean | null>[], columns: string[]) => void;
+    onDataResult: (data: Record<string, string | number | boolean | null>[], columns: string[], pagination: PaginationData) => void;
+    
 }
 
 interface Message {
@@ -22,19 +30,7 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    // const [prevColsString, setPrevColsString] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
-
-
-    // const currentColsString = selectedColumns.join(', ');
-    // if (currentColsString !== prevColsString) {
-    //     setPrevColsString(currentColsString);
-    //     setInput(
-    //         selectedColumns.length > 0
-    //             ? `Show me data involving these columns: ${currentColsString}`
-    //             : ''
-    //     );
-    // }
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -58,7 +54,7 @@ const handleSend = async (overrideText?: string | React.MouseEvent) => {
                 selected_columns: selectedColumns
             });
 
-            const { data, columns, sql } = response.data;
+            const { data, columns, sql, pagination } = response.data;
 
             setMessages(prev => [...prev, {
                 role: 'assistant',
@@ -66,7 +62,7 @@ const handleSend = async (overrideText?: string | React.MouseEvent) => {
                 sql: sql
             }]);
 
-            onDataResult(data, columns);
+            onDataResult(data, columns, pagination);
 
         } catch (error: unknown) {
             if (axios.isAxiosError(error)) {

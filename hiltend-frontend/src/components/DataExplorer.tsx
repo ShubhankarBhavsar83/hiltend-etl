@@ -41,6 +41,8 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const [isLoadingData, setIsLoadingData] = useState(false);
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: "asc" | "desc" } | null>(null);
     const [executedQueryText, setExecutedQueryText] = useState<string>("");
+    const [pageSize, setPageSize] = useState(100);
+    const [viewMode, setViewMode] = useState<"table" | "ai_query" | null>(null);
 
     // Cross-Table Custom Selection State (Stores keys formatted as "TableName.ColumnName")
     const [customSelectedColumns, setCustomSelectedColumns] = useState<string[]>([]);
@@ -61,6 +63,10 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const [isDatasetSummarizing, setIsDatasetSummarizing] = useState(false);
     const [datasetSummaryText, setDatasetSummaryText] = useState<string | null>(null);
 
+    // Single Table Column Visibility State
+    const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
+    const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
+
     const handleSummarizeDataset = async () => {
         setIsDatasetSummaryModalOpen(true);
         if (datasetSummaryText) return; // Don't re-fetch if we already have it
@@ -77,9 +83,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         }
     };
 
-    // Single Table Column Visibility State
-    const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
-    const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
 
     const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
@@ -138,14 +141,15 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         );
     };
 
-    const fetchTableData = async (tableName: string, page: number = 1) => {
+    const fetchTableData = async (tableName: string, page: number = 1, currentSize: number = pageSize) => {
         setIsLoadingData(true);
         setActiveTableName(tableName);
         setCustomSelectedColumns([]);
         setSortConfig(null);
+        setViewMode("table");
 
         try {
-            const res = await apiClient.get(`/api/v1/datasets/${selectedDataset}/tables/${tableName}/data?page=${page}&page_size=100`);
+            const res = await apiClient.get(`/api/v1/datasets/${selectedDataset}/tables/${tableName}/data?page=${page}&page_size=${currentSize}`);
 
             const fetchedCols = res.data.columns;
             setActiveTableColumns(fetchedCols);
@@ -184,9 +188,14 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
             setExecutedQueryText(res.data.sql);
 
             setVisibleColumns(res.data.columns);
-            setCurrentPage(1);
-            setTotalPages(1);
-            setTotalRecords(res.data.data.length);
+            // setCurrentPage(1);
+            // setTotalPages(1);
+            // setTotalRecords(res.data.data.length);
+
+            setCurrentPage(res.data.pagination.current_page);
+            setTotalPages(res.data.pagination.total_pages);
+            setTotalRecords(res.data.pagination.total_records);
+            setViewMode("ai_query");
         } catch (err) {
             console.error("Custom selection view execution crashed", err);
             setActiveTableColumns([]);
@@ -196,9 +205,32 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         }
     };
 
-    const handlePageChange = (newPage: number) => {
-        if (activeTableName && newPage >= 1 && newPage <= totalPages) {
-            fetchTableData(activeTableName, newPage);
+    // const handlePageChange = (newPage: number) => {
+    //     if (activeTableName && newPage >= 1 && newPage <= totalPages) {
+    //         fetchTableData(activeTableName, newPage);
+    //     }
+    // };
+
+    const fetchPaginatedData = async (targetPage: number, size: number = pageSize) => {
+        if (viewMode === "table" && activeTableName) {
+            await fetchTableData(activeTableName, targetPage, size);
+        } else if (viewMode === "ai_query" && executedQueryText) {
+            setIsLoadingData(true);
+            try {
+                const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/execute-paginated?page=${targetPage}&page_size=${size}`, {
+                    sql: executedQueryText
+                });
+
+                setActiveTableColumns(res.data.columns);
+                setActiveTableData(res.data.data);
+                setCurrentPage(res.data.pagination.current_page);
+                setTotalPages(res.data.pagination.total_pages);
+                setTotalRecords(res.data.pagination.total_records);
+            } catch (err) {
+                console.error("Pagination execution failed", err);
+            } finally {
+                setIsLoadingData(false);
+            }
         }
     };
 
@@ -254,14 +286,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                 "flex flex-col bg-gray-50 border-r border-gray-200 transition-all duration-300 ease-in-out shrink-0",
                 isSchemaOpen ? "w-64" : "w-0 border-none opacity-0"
             )}>
-                {/* <div className="h-10 px-3 flex items-center justify-between border-b border-gray-200 bg-gray-100/50 shrink-0">
-                    <span className="font-semibold text-gray-700 text-[13px] tracking-tight uppercase">Explorer</span>
-                    {customSelectedColumns.length > 0 && (
-                        <Button variant="ghost" className="h-6 px-1.5 text-[11px] text-gray-500" onClick={() => setCustomSelectedColumns([])}>
-                            Clear ({customSelectedColumns.length})
-                        </Button>
-                    )}
-                </div> */}
                 <div className="h-10 px-3 flex items-center justify-between border-b border-gray-200 bg-gray-100/50 shrink-0">
                     <span className="font-semibold text-gray-700 text-[13px] tracking-tight uppercase">Explorer</span>
                     <div className="flex items-center gap-1">
@@ -463,8 +487,28 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
 
                                 {/* Left side: Showing X-Y of Z records */}
                                 <div className="flex items-center gap-4 text-gray-600">
+                                    {(viewMode === "table" || viewMode === "ai_query") && (
+                                        <div className="flex items-center gap-2 border-r border-gray-300 pr-4">
+                                            <span className="text-[11px] text-gray-500">Rows per page:</span>
+                                            <select
+                                                value={pageSize}
+                                                onChange={(e) => {
+                                                    const newSize = Number(e.target.value);
+                                                    setPageSize(newSize);
+                                                    fetchPaginatedData(1, newSize); // Automatically handles both view modes
+                                                }}
+                                                className="border border-gray-200 rounded px-1 py-0.5 text-[11px] bg-white focus:outline-none focus:border-blue-500 text-gray-700 cursor-pointer"
+                                            >
+                                                {[20, 40, 60, 80, 100].map(size => (
+                                                    <option key={size} value={size}>{size}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {/* --> UPDATED: Dynamic record count calculation */}
                                     <span>
-                                        Showing {(currentPage - 1) * 100 + 1}-{Math.min(currentPage * 100, totalRecords)} of {totalRecords} records
+                                        Showing {(currentPage - 1) * pageSize + (totalRecords > 0 ? 1 : 0)}-{Math.min(currentPage * pageSize, totalRecords)} of {totalRecords} records
                                     </span>
 
                                     {/* SQL Query Display (Copyable) */}
@@ -481,11 +525,19 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                 </div>
 
                                 {/* Right side: Pagination or Match count */}
-                                {activeTableName ? (
+                                {(viewMode === "table" || viewMode === "ai_query") ? (
                                     <div className="flex items-center gap-3">
-                                        <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" disabled={currentPage === 1} onClick={() => handlePageChange(currentPage - 1)}>Prev</Button>
+                                        <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]"
+                                            disabled={currentPage === 1}
+                                            onClick={() => fetchPaginatedData(currentPage - 1)}>
+                                            Prev
+                                        </Button>
                                         <span className="font-semibold text-gray-700">Page {currentPage} / {totalPages}</span>
-                                        <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" disabled={currentPage === totalPages} onClick={() => handlePageChange(currentPage + 1)}>Next</Button>
+                                        <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]"
+                                            disabled={currentPage === totalPages}
+                                            onClick={() => fetchPaginatedData(currentPage + 1)}>
+                                            Next
+                                        </Button>
                                     </div>
                                 ) : (
                                     <span>{sortedData.length} total rows matched</span>
@@ -532,14 +584,15 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                         <NLQChatbot
                             datasetName={selectedDataset}
                             selectedColumns={visibleColumns}
-                            onDataResult={(data, columns) => {
+                            onDataResult={(data, columns, pagination) => {
                                 setActiveTableData(data);
                                 setActiveTableColumns(columns);
-                                setActiveTableName("AI Query Result");
+                                setActiveTableName(null);
                                 setVisibleColumns(columns);
-                                setCurrentPage(1);
-                                setTotalPages(1);
-                                setTotalRecords(data.length);
+                                setCurrentPage(pagination.current_page);
+                                setTotalPages(pagination.total_pages);
+                                setTotalRecords(pagination.total_records);
+                                setViewMode("ai_query");
                             }}
                         />
                     </div>

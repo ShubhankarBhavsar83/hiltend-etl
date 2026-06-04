@@ -42,6 +42,47 @@ class NLQRequest(BaseModel):
 class SummarizeRequest(BaseModel):
     data: List[Dict[str, Any]]
     user_context: Optional[str] = None
+    
+class QueryExecutionRequest(BaseModel):
+    sql: str
+    
+    
+def _execute_and_paginate(db: Session, sql: str, page: int, page_size: int):
+    clean_sql_upper = sql.upper().strip()
+    if not clean_sql_upper.startswith("SELECT"):
+        raise HTTPException(status_code=400, detail="Only SELECT queries are permitted.")
+    if any(keyword in clean_sql_upper for keyword in ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE"]):
+        raise HTTPException(status_code=400, detail="Destructive execution patterns blocked.")
+
+    count_query = text(f"SELECT COUNT(*) FROM ({sql}) AS SubQ")
+    total_records = db.execute(count_query).scalar()
+
+    offset = (page - 1) * page_size
+    paginated_sql = f"""
+        WITH BaseQuery AS ({sql})
+        SELECT * FROM BaseQuery
+        ORDER BY (SELECT NULL)
+        OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY
+    """
+    
+    result = db.execute(text(paginated_sql), {"offset": offset, "page_size": page_size})
+    
+    columns = _deduplicate_columns(list(result.keys()))
+    rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+    return {
+        "columns": columns,
+        "data": rows,
+        "sql": sql,
+        "pagination": {
+            "total_records": total_records,
+            "current_page": page,
+            "page_size": page_size,
+            "total_pages": (total_records + page_size - 1) // page_size
+        }
+    }
+
+
 
 def _deduplicate_columns(raw_columns: list[str]) -> list[str]:
     """Ensures all column names are strictly unique to prevent dictionary key overwriting."""
@@ -116,6 +157,20 @@ def process_pipeline_background(local_path: str, safe_name: str, dataset_name: s
 
     
 
+@router.post("/api/v1/datasets/{dataset_name}/execute-paginated", dependencies=[Security(azure_scheme)])
+def execute_paginated_query(
+    dataset_name: str = Path(...),
+    payload: QueryExecutionRequest = ...,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=20, le=100),
+    db: Session = Depends(get_db)
+):
+    """Endpoint for the frontend to fetch page 2+ without re-triggering the LLM."""
+    try:
+        return _execute_and_paginate(db, payload.sql, page, page_size)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
+
 
 @router.post("/api/v1/datasets/{dataset_name}/explain-schema", dependencies=[Security(azure_scheme)])
 def explain_dataset_schema(dataset_name: str = Path(...), db: Session = Depends(get_db)):
@@ -154,6 +209,8 @@ def explain_dataset_schema(dataset_name: str = Path(...), db: Session = Depends(
 def execute_natural_language_query(
     dataset_name: str = Path(...), 
     payload: NLQRequest = ..., 
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=20, le=100),
     db: Session = Depends(get_db)
 ):
     try:
@@ -181,7 +238,8 @@ def execute_natural_language_query(
             cols_str = ", ".join(payload.selected_columns)
             final_prompt = f"The user has specifically focused on these columns: {cols_str}. {payload.prompt}"
 
-        generated_sql = ai_service.generate_sql_query(dataset_name, final_prompt, schema_context)     
+        # generated_sql = ai_service.generate_sql_query(dataset_name, final_prompt, schema_context)
+        generated_sql = ai_service.generate_sql_query(dataset_name, final_prompt, schema_context) 
            
         clean_sql_upper = generated_sql.upper().strip()
         if not clean_sql_upper.startswith("SELECT"):
@@ -194,11 +252,13 @@ def execute_natural_language_query(
         columns = _deduplicate_columns(list(result.keys()))
         rows = [dict(zip(columns, row)) for row in result.fetchall()]
 
-        return {
-            "columns": columns,
-            "data": rows,
-            "sql": generated_sql
-        }
+        # return {
+        #     "columns": columns,
+        #     "data": rows,
+        #     "sql": generated_sql
+        # }
+        
+        return _execute_and_paginate(db, generated_sql, page, page_size)
 
     except Exception as e:
         print(f"[NLQ Error] Execution failed: {e}")
@@ -245,7 +305,13 @@ def summarize_data_view(dataset_name: str = Path(...), payload: SummarizeRequest
 
 
 @router.post("/api/v1/datasets/{dataset_name}/custom-view", dependencies=[Security(azure_scheme)])
-def execute_custom_join_view(dataset_name: str = Path(...), payload: CustomViewRequest = ..., db: Session = Depends(get_db)):
+def execute_custom_join_view(
+    dataset_name: str = Path(...), 
+    payload: CustomViewRequest = ..., 
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=20, le=100),
+    db: Session = Depends(get_db)
+):    
     if not payload.columns:
         raise HTTPException(status_code=400, detail="No columns selected.")
         
@@ -266,6 +332,7 @@ def execute_custom_join_view(dataset_name: str = Path(...), payload: CustomViewR
         for t, cols in tables_dict.items():
             schema_context += f"Table: {t}\nColumns: {', '.join(cols)}\n\n"
 
+        # generated_sql = ai_service.generate_join_query(dataset_name, payload.columns, schema_context)
         generated_sql = ai_service.generate_join_query(dataset_name, payload.columns, schema_context)
         
         clean_sql_upper = generated_sql.upper().strip()
@@ -279,11 +346,13 @@ def execute_custom_join_view(dataset_name: str = Path(...), payload: CustomViewR
         columns = _deduplicate_columns(list(result.keys()))
         rows = [dict(zip(columns, row)) for row in result.fetchall()]
         
-        return {
-            "columns": columns,
-            "data": rows,
-            "sql": generated_sql
-        }
+        # return {
+        #     "columns": columns,
+        #     "data": rows,
+        #     "sql": generated_sql
+        # }
+        return _execute_and_paginate(db, generated_sql, page, page_size)
+        
     except Exception as e:
         print(f"[Custom View Error] Execution failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to compile custom view: {str(e)}")    
@@ -480,7 +549,7 @@ def get_table_data(
     dataset_name: str = Path(...), 
     table_name: str = Path(...), 
     page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=1000),
+    page_size: int = Query(100, ge=20, le=100),
     db: Session = Depends(get_db)
 ):
     """Safely fetches paginated rows from a specific table."""

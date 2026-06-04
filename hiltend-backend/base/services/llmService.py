@@ -46,6 +46,7 @@ class LLMService:
         1. Identify the primary key column(s) (e.g., 'id', 'uuid', or the closest equivalent).
         2. The 'fact_table' array MUST contain these primary keys PLUS the numeric metrics/facts.
         3. EVERY dimension array MUST contain the primary key as its FIRST item, followed by the descriptive attributes. Do NOT create disconnected dimensions without the primary key!
+        4. ALL relevant tables MUST HAVE appropriate relational mapping to allow custom tables views using the primary/foreign.
 
         CRITICAL FORMATTING INSTRUCTION: 
         You MUST respond in pure JSON adhering EXACTLY to the following structure. Do not add nested objects. Do not add extra keys like 'name' or 'metrics'. 'fact_table' MUST be a flat array of strings. 'dimensions' MUST be a dictionary of arrays.
@@ -187,24 +188,6 @@ class LLMService:
         
     def generate_join_query(self, dataset_name: str, selected_columns: list[str], schema_context: str) -> str:
         
-        # system_prompt = f"""
-        # You are an expert Data Engineer working with Azure SQL. 
-        # The user wants to build a custom view by selecting specific columns across separate tables in the '{dataset_name}' schema.
-        
-        # SCHEMA STRUCTURE CONTEXT:
-        # {schema_context}
-        
-        # YOUR TASK:
-        # Generate a single, optimized T-SQL SELECT query that retrieves exactly the columns requested by the user.
-        # Determine the correct JOIN relationships based on the primary/foreign keys visible in the schema context (e.g., joining a dimension to a fact table on their shared ID column).
-        
-        # CRITICAL RULES:
-        # 1. Fully qualify all column names using bracket notation: [{dataset_name}].[TableName].[ColumnName]
-        # 2. Use proper INNER JOIN or LEFT JOIN syntax based on standard star schema conventions.
-        # 3. Only return the RAW T-SQL query code. Do NOT wrap it in markdown blocks (no ```sql), no explanations, and no extra characters.
-        # 4. The query must strictly be a read-only SELECT statement.
-        # """
-        
         system_prompt = f"""
         You are an expert Data Engineer. Your goal is to generate a valid T-SQL SELECT query for a Star Schema in the schema '{dataset_name}'.
         
@@ -215,13 +198,14 @@ class LLMService:
         1. ANCHOR: The query MUST identify the relevant FACT table (the table containing IDs from multiple dimensions).
         2. JOIN PATTERN: All DIMENSION tables must join directly to the FACT table. Do NOT join dimensions to other dimensions.
         3. SYNTAX: Use fully qualified names: [{dataset_name}].[TableName].[ColumnName].
-        4. NO ALIASES: Do not use aliases (like 'AS f') unless necessary. 
+        4. ALIAS DUPLICATES (CRITICAL): If the user selects columns with the exact same name from different tables (e.g., 'repo_id' from Dim_Time and 'repo_id' from Dim_Repository), you MUST alias them in the SELECT clause to guarantee unique column names (e.g., SELECT [Dim_Time].[repo_id] AS [Dim_Time_repo_id]). Un-aliased duplicates will crash the downstream pagination CTE.
         5. OUTPUT: Return ONLY the raw T-SQL. No markdown, no triple backticks, no conversational text.
         
-        Example of correct join pattern:
-        SELECT [Dim_A].[Col], [Fact_X].[Col]
+        Example of correct join pattern with aliasing:
+        SELECT [Dim_A].[ID] AS [Dim_A_ID], [Dim_B].[ID] AS [Dim_B_ID], [Fact_X].[Metric]
         FROM [Fact_X]
         INNER JOIN [Dim_A] ON [Fact_X].[ID] = [Dim_A].[ID]
+        INNER JOIN [Dim_B] ON [Fact_X].[B_ID] = [Dim_B].[ID]
         """
         
         user_prompt = f"Requested Columns to Join:\n" + "\n".join(selected_columns)
