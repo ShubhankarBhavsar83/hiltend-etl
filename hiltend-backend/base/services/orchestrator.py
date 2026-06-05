@@ -8,25 +8,6 @@ from base.database.session import engine
 from databricks.sdk import WorkspaceClient
 from base.core.config import settings
 
-# def _get_workspace_client() -> WorkspaceClient:
-#     """Helper method to authenticate Databricks natively using Azure Entra ID."""
-    
-#     if settings.environment != "cloud":
-#         print("[Databricks Auth] Using native Azure Client Secret authentication (Local).")
-#         # The SDK natively authenticates the Service Principal using these parameters
-#         return WorkspaceClient(
-#             host=settings.databricks_host,
-#             azure_tenant_id=settings.azure_tenant_id,
-#             azure_client_id=settings.azure_client_id,
-#             azure_client_secret=settings.client_secret
-#         )
-#     else:
-#         print("[Databricks Auth] Using native Azure Managed Identity authentication (Cloud).")
-#         # In the cloud, we tell the SDK to use the Container App's System-Assigned Managed Identity
-#         return WorkspaceClient(
-#             host=settings.databricks_host,
-#             # azure_use_msi=True
-#         )
 
 def _get_workspace_client() -> WorkspaceClient:
 

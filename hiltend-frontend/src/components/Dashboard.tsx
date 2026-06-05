@@ -59,7 +59,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
     try {
       await apiClient.post('/api/v1/ping');
       setPingStatus("success");
-      await fetchDatasets();
+      // await fetchDatasets();
       setTimeout(() => setPingStatus("idle"), 4000);
     } catch (err) {
       console.error("Ping request failed:", err);
@@ -155,6 +155,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
             {pingStatus === "success" && <><span className="text-green-500 font-bold">✓</span> Services Awake</>}
             {pingStatus === "error" && <><span className="text-red-500 font-bold">!</span> Ping Failed</>}
           </Button>
+
         </div>
 
         <div className="flex-1 md:p-10 p-5">

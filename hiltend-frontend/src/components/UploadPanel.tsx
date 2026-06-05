@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,7 +6,7 @@ import { Alert, AlertDescription, } from "@/components/ui/alert";
 
 import { cn } from "@/lib/utils";
 import { useApiClient } from "../hooks/useApiClient";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 
 type PipelineStep = "idle" | "queued" | "staging" | "extracting" | "ai_mapping" | "etl_running" | "completed" | "error";
 
@@ -50,6 +50,25 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
     }
   };
 
+  const fetchDatasets = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/api/v1/datasets');
+
+      setDatasets(res.data.datasets);
+      if (res.data.datasets.length > 0) setSelectedDataset(res.data.datasets[0]);
+      // setFetchError(null);
+
+    } catch (err) {
+      const axiosError = err as AxiosError;
+      console.error("Failed to fetch datasets:", axiosError);
+      // if (axiosError.response?.status === 503) {
+      //   setFetchError("Database is asleep. Please wake services.");
+      // } else {
+      //   setFetchError("Connection error.");
+      // }
+    }
+  }, [apiClient, setDatasets, setSelectedDataset]);
+
   // --- Upload Handlers ---
   const acceptFiles = (incomingFiles: FileList | File[]) => {
     const validFiles = Array.from(incomingFiles).filter(f => f.name.endsWith(".csv"));
@@ -74,7 +93,6 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
     try {
       const formData = new FormData();
       formData.append("dataset_name", selectedDataset);
-      // Append each file to the 'files' array in FormData
       files.forEach(f => formData.append("files", f));
 
       const res = await apiClient.post('/api/v1/ingest', formData);
@@ -102,16 +120,14 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
         const res = await apiClient.get(`/api/v1/status/${currentId}`);
         setPipelineStep(res.data.step);
 
-        // Add a prefix so the user knows which file is currently processing
         setStatusMessage(`[File ${activeFileIndex + 1} of ${fileIds.length}] ${res.data.message}`);
 
         if (res.data.step === "completed" || res.data.step === "error") {
           clearInterval(interval);
 
-          // Move to the next file in the queue if one exists
           if (activeFileIndex < fileIds.length - 1) {
             setActiveFileIndex(prev => prev + 1);
-            setPipelineStep("queued"); // Reset visual status for the new file
+            setPipelineStep("queued");
           }
         }
       } catch (err) {
@@ -143,6 +159,9 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
               >
                 {datasets.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
+              <Button size="sm" onClick={fetchDatasets}>
+                Get Datasets
+              </Button>
             </div>
             <span className="text-sm text-gray-400 mb-2">or</span>
             <div className="flex-1 flex gap-2">
@@ -185,7 +204,6 @@ export default function UploadPanel({ datasets, setDatasets, selectedDataset, se
           onDrop={(e) => { e.preventDefault(); setIsDragging(false); acceptFiles(e.dataTransfer.files); }}
           onClick={() => !isActive && files.length === 0 && fileInputRef.current?.click()}
         >
-          {/* UPDATED: Multiple input accepted */}
           <input ref={fileInputRef} type="file" multiple accept=".csv" className="hidden" onChange={(e) => e.target.files && acceptFiles(e.target.files)} disabled={isActive} />
 
           {files.length > 0 ? (

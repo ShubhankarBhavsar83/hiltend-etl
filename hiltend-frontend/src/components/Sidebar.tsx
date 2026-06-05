@@ -69,11 +69,10 @@ export default function Sidebar({ account, activeNav, onNavChange, onLogout, isO
       <aside
         className={cn(
           "h-screen shrink-0 bg-gray-900 transition-all duration-300 ease-in-out z-50",
-          "absolute md:relative", // Overlay on mobile, pushes content on desktop
+          "absolute md:relative", 
           isOpen ? "translate-x-0 w-55" : "-translate-x-full md:translate-x-0 w-55 md:w-0 overflow-hidden"
         )}
       >
-        {/* Inner container stays fixed width so content doesn't wrap during animation */}
         <div className="w-55 p-5 flex flex-col h-full min-w-[220px]">
           
           <div className="flex items-center gap-2 text-base font-semibold px-2 pb-6">

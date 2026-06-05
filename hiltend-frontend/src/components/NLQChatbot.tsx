@@ -143,7 +143,6 @@ const handleSend = async (overrideText?: string | React.MouseEvent) => {
                     </div>
                 )}
 
-                {/* Added auto-scroll anchor */}
                 <div ref={messagesEndRef} />
             </div>
 

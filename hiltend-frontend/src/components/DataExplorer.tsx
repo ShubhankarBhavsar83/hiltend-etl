@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import { NLQChatbot } from './NLQChatbot';
 import { useApiClient } from "../hooks/useApiClient";
 import { cn } from "@/lib/utils";
+import DataVisualizer from "./DataVisualizer";
+import { BarChart2 } from "lucide-react";
 
 interface DataExplorerProps {
     selectedDataset: string;
@@ -67,9 +69,11 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
     const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
 
+    const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
+
     const handleSummarizeDataset = async () => {
         setIsDatasetSummaryModalOpen(true);
-        if (datasetSummaryText) return; // Don't re-fetch if we already have it
+        if (datasetSummaryText) return;
 
         setIsDatasetSummarizing(true);
         try {
@@ -188,10 +192,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
             setExecutedQueryText(res.data.sql);
 
             setVisibleColumns(res.data.columns);
-            // setCurrentPage(1);
-            // setTotalPages(1);
-            // setTotalRecords(res.data.data.length);
-
             setCurrentPage(res.data.pagination.current_page);
             setTotalPages(res.data.pagination.total_pages);
             setTotalRecords(res.data.pagination.total_records);
@@ -204,12 +204,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
             setIsLoadingData(false);
         }
     };
-
-    // const handlePageChange = (newPage: number) => {
-    //     if (activeTableName && newPage >= 1 && newPage <= totalPages) {
-    //         fetchTableData(activeTableName, newPage);
-    //     }
-    // };
 
     const fetchPaginatedData = async (targetPage: number, size: number = pageSize) => {
         if (viewMode === "table" && activeTableName) {
@@ -427,7 +421,17 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                 Summarise Results
                             </Button>
                         )}
-
+                        {executedQueryText && activeTableData.length > 0 && (
+                            <Button
+                                onClick={() => setIsVisualizerOpen(true)}
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-[12px] flex gap-1.5 items-center bg-purple-50/50 text-purple-700 hover:bg-purple-100 border-purple-200 transition-colors"
+                            >
+                                <BarChart2 size={14} />
+                                Visualise Data
+                            </Button>
+                        )}
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-600 hover:bg-blue-50 rounded-sm" onClick={() => setIsChatOpen(!isChatOpen)}>
                             <SparklesIcon />
                         </Button>
@@ -436,6 +440,15 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
 
                 {/* Dynamic Sortable Table Canvas */}
                 <div className="flex-1 overflow-auto p-4 bg-gray-50/30 flex flex-col relative z-0" onClick={() => setIsColumnMenuOpen(false)}>
+                    {isVisualizerOpen && executedQueryText && (
+                        <DataVisualizer
+                            datasetName={selectedDataset}
+                            sql={executedQueryText}
+                            availableColumns={activeTableColumns}
+                            onClose={() => setIsVisualizerOpen(false)}
+                        />
+                    )}
+
                     {isLoadingData ? (
                         <div className="flex-1 flex items-center justify-center text-gray-400 font-mono text-sm">Executing query...</div>
                     ) : activeTableColumns.length === 0 ? (
@@ -506,7 +519,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                         </div>
                                     )}
 
-                                    {/* --> UPDATED: Dynamic record count calculation */}
                                     <span>
                                         Showing {(currentPage - 1) * pageSize + (totalRecords > 0 ? 1 : 0)}-{Math.min(currentPage * pageSize, totalRecords)} of {totalRecords} records
                                     </span>
@@ -553,17 +565,13 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
             <div
                 className={cn(
                     "absolute right-0 top-0 bottom-0 bg-gray-50 border-gray-200 transition-all duration-300 ease-in-out z-40 shadow-2xl flex flex-col overflow-hidden",
-                    // When open, add the border and fade in. When closed, shrink to 0, remove border, fade out, and disable clicks.
                     isChatOpen ? "border-l opacity-100" : "w-0 border-none opacity-0 pointer-events-none"
                 )}
-                // CRITICAL FIX: Only apply the inline width style if the chat is OPEN.
-                // If closed, this returns undefined, allowing Tailwind's 'w-0' class to take over and shrink it.
                 style={isChatOpen ? {
                     width: isChatExpanded ? '600px' : '320px',
                     ...(isChatExpanded ? { resize: 'horizontal', direction: 'rtl', minWidth: '320px', maxWidth: '85vw' } : {})
                 } : undefined}
             >
-                {/* Inner wrapper resets direction to LTR so content doesn't flip backwards */}
                 <div style={{ direction: 'ltr' }} className="flex flex-col h-full w-full min-w-[320px] pointer-events-auto">
                     <div className="h-10 px-3 flex items-center justify-between border-b border-gray-200 bg-blue-50/50 shrink-0">
                         <div className="flex items-center gap-2 text-blue-700">
@@ -675,7 +683,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     );
 }
 
-// --- Minimalist SVG Icons for IDE Feel ---
+// --- SVG Icons ---
 const ChevronIcon = ({ isOpen }: { isOpen: boolean }) => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("text-gray-400 transition-transform shrink-0", isOpen && "rotate-90")}>
         <polyline points="9 18 15 12 9 6" />

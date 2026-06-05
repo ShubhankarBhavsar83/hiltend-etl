@@ -1,5 +1,7 @@
 import os
 import re
+import csv
+import io
 import uuid
 import shutil
 from fastapi import APIRouter, Depends, Query, Security, UploadFile, Form, File, Path, BackgroundTasks, HTTPException
@@ -45,6 +47,10 @@ class SummarizeRequest(BaseModel):
     # sql : str
     user_context: Optional[str] = None
     
+class ChartSummarizeRequest(BaseModel):
+    data: List[Dict[str, Any]]
+    user_context: Optional[str] = None
+    
 class QueryExecutionRequest(BaseModel):
     sql: str
     
@@ -54,7 +60,6 @@ def _execute_and_paginate(db: Session, sql: str, page: int, page_size: int):
     if not clean_sql_upper.startswith("SELECT"):
         raise HTTPException(status_code=400, detail="Only SELECT queries are permitted.")
         
-    # <-- UPDATED: Use regex word boundaries to prevent false positives on columns like 'updated_at'
     destructive_pattern = re.compile(r'\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE)\b')
     if destructive_pattern.search(clean_sql_upper):
         raise HTTPException(status_code=400, detail="Destructive execution patterns blocked.")
@@ -88,6 +93,30 @@ def _execute_and_paginate(db: Session, sql: str, page: int, page_size: int):
     }
 
 
+
+def _execute_full(db: Session, sql: str, limit: int = 5000):
+    clean_sql_upper = sql.upper().strip()
+    if not clean_sql_upper.startswith("SELECT"):
+        raise HTTPException(status_code=400, detail="Only SELECT queries are permitted.")
+        
+    destructive_pattern = re.compile(r'\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE)\b')
+    if destructive_pattern.search(clean_sql_upper):
+        raise HTTPException(status_code=400, detail="Destructive execution patterns blocked.")
+
+    # Wrap the user query to enforce a hard limit for browser/DB safety
+    safe_sql = f"SELECT TOP {limit} * FROM ({sql}) AS SubQ"
+    
+    result = db.execute(text(safe_sql))
+    
+    columns = _deduplicate_columns(list(result.keys()))
+    rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+    return {
+        "columns": columns,
+        "data": rows,
+        "sql": sql,
+        "limit_applied": limit
+    }
 
 def _deduplicate_columns(raw_columns: list[str]) -> list[str]:
     """Ensures all column names are strictly unique to prevent dictionary key overwriting."""
@@ -161,6 +190,62 @@ def process_pipeline_background(local_path: str, safe_name: str, dataset_name: s
             os.remove(local_path)
 
     
+    
+# --- NEW ENDPOINT: Fetch full dataset for charts ---
+@router.post("/api/v1/datasets/{dataset_name}/execute-full", dependencies=[Security(azure_scheme)])
+def execute_full_query(
+    dataset_name: str = Path(...),
+    payload: QueryExecutionRequest = ...,
+    db: Session = Depends(get_db)
+):
+    """Endpoint for the frontend to fetch up to 5000 rows for chart visualization."""
+    try:
+        return _execute_full(db, payload.sql)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Full execution failed: {str(e)}")
+
+
+# --- NEW ENDPOINT: Summarize chart data via CSV ---
+@router.post("/api/v1/datasets/{dataset_name}/summarize-chart", dependencies=[Security(azure_scheme)])
+def summarize_chart_data(
+    dataset_name: str = Path(...), 
+    payload: ChartSummarizeRequest = ..., 
+):
+    if not payload or not payload.data:
+        raise HTTPException(status_code=400, detail="No data provided to summarize.")
+    
+    # 1. Convert JSON array to CSV string
+    output = io.StringIO()
+    if len(payload.data) > 0:
+        writer = csv.DictWriter(output, fieldnames=payload.data[0].keys())
+        writer.writeheader()
+        writer.writerows(payload.data)
+    
+    csv_string = output.getvalue()
+    
+    # 2. Llama 3.3 70B TPM Constraint Management (~45,000 chars = ~11k tokens)
+    MAX_CHARS = 45000
+    is_sampled = False
+    
+    if len(csv_string) > MAX_CHARS:
+        is_sampled = True
+        # Truncate to the nearest safe newline to avoid cutting a row in half
+        truncated = csv_string[:MAX_CHARS]
+        last_newline = truncated.rfind('\n')
+        if last_newline != -1:
+            csv_string = truncated[:last_newline]
+        else:
+            csv_string = truncated
+    
+    try:
+        summary = ai_service.generate_chart_summary(dataset_name, csv_string, payload.user_context or "", is_sampled)
+        return {"summary": summary}
+        
+    except Exception as e:
+        import traceback
+        print(f"\n[Chart Summarize Error] {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"LLM Error: {str(e)}")
 
 @router.post("/api/v1/datasets/{dataset_name}/execute-paginated", dependencies=[Security(azure_scheme)])
 def execute_paginated_query(
@@ -254,22 +339,6 @@ def execute_natural_language_query(
             detail="The AI generated an invalid query or encountered a data type mismatch. Please try rephrasing your question."
             )
   
-
-# @router.post("/api/v1/datasets/{dataset_name}/summarize", dependencies=[Security(azure_scheme)])
-# def summarize_data_view(dataset_name: str = Path(...), payload: SummarizeRequest = None):
-#     if not payload or not payload.data:
-#         raise HTTPException(status_code=400, detail="No data provided to summarize.")
-    
-#     sample_data = payload.data[:15]
-    
-#     try:
-#         summary = ai_service.generate_data_summary(str(sample_data), payload.user_context or "")
-#         return {"summary": summary}
-#     except Exception as e:
-#         import traceback
-#         print(f"\n[Summarize Error] {str(e)}")
-#         traceback.print_exc()
-#         raise HTTPException(status_code=500, detail=f"LLM Error: {str(e)}")
     
 @router.post("/api/v1/datasets/{dataset_name}/summarize", dependencies=[Security(azure_scheme)])
 def summarize_data_view(

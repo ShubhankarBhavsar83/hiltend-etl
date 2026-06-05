@@ -226,3 +226,43 @@ class LLMService:
         except Exception as e:
             print(f"Error generating join query: {e}")
             raise e
+        
+        
+    def generate_chart_summary(self, dataset_name: str, csv_data: str, user_context: str = "", is_sampled: bool = False) -> str:
+            
+            sampling_warning = ""
+            if is_sampled:
+                sampling_warning = "CRITICAL: Due to context window limits, the data provided is a SAMPLED SUBSET of the full chart dataset. Do not claim these are absolute totals; phrase your analysis as 'Based on the sampled data...' or identify trends rather than exact universal sums."
+
+            system_prompt = f"""
+            You are an expert Data Analyst analyzing a visualized chart dataset from the '{dataset_name}' schema. 
+            The user has provided the underlying chart data in CSV format.
+            
+            {sampling_warning}
+            
+            Provide a detailed summary of this chart data. 
+            Identify key metrics, trends, anomalies, or interesting distributions.
+            Format your response cleanly using bullet points or short paragraphs. Do not echo the raw data back.
+            """
+            
+            if user_context:
+                system_prompt += f"\n\nCRITICAL USER INSTRUCTIONS TO FOCUS ON:\n{user_context}"
+                
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.deployment_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Chart Data (CSV):\n{csv_data}"}
+                    ],
+                    temperature=0.3
+                )
+                
+                content = response.choices[0].message.content
+                if not content:
+                    return "The AI returned an empty response. This is likely due to an Azure safety/content filter."
+                    
+                return content.strip()
+            except Exception as e:
+                print(f"Error generating chart summary: {e}")
+                raise e

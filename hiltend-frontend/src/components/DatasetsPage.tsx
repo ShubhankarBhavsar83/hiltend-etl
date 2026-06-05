@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useApiClient } from "../hooks/useApiClient";
 import { cn } from "@/lib/utils";
+import type { AxiosError } from "axios";
 
 interface DatasetsPageProps {
   datasets: string[];
@@ -18,14 +19,36 @@ interface TableDetail {
 
 export default function DatasetsPage({ datasets, setDatasets, selectedDataset, setSelectedDataset }: DatasetsPageProps) {
   const apiClient = useApiClient();
-  
+
   const [activeViewDataset, setActiveViewDataset] = useState<string | null>(datasets[0] || null);
   const [tables, setTables] = useState<TableDetail[]>([]);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
-  
+  // const [fetchError, setFetchError] = useState<string | null>(null);
+
+
   const [newDatasetName, setNewDatasetName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+
+  const fetchDatasets = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/api/v1/datasets');
+
+      setDatasets(res.data.datasets);
+      if (res.data.datasets.length > 0) setSelectedDataset(res.data.datasets[0]);
+      // setFetchError(null);
+
+    } catch (err) {
+      const axiosError = err as AxiosError;
+      console.error("Failed to fetch datasets:", axiosError);
+      // if (axiosError.response?.status === 503) {
+      //   setFetchError("Database is asleep. Please wake services.");
+      // } else {
+      //   setFetchError("Connection error.");
+      // }
+    }
+  }, [apiClient, setDatasets, setSelectedDataset]);
 
   const fetchDatasetDetails = useCallback(async (datasetName: string) => {
     setIsLoadingDetails(true);
@@ -67,7 +90,7 @@ export default function DatasetsPage({ datasets, setDatasets, selectedDataset, s
       await apiClient.delete(`/api/v1/datasets/${datasetName}`);
       const updatedDatasets = datasets.filter(d => d !== datasetName);
       setDatasets(updatedDatasets);
-      
+
       if (selectedDataset === datasetName) setSelectedDataset(updatedDatasets[0] || "");
       if (activeViewDataset === datasetName) setActiveViewDataset(updatedDatasets[0] || null);
     } catch (err) {
@@ -84,14 +107,19 @@ export default function DatasetsPage({ datasets, setDatasets, selectedDataset, s
         <div className="flex flex-col gap-2">
           <span className="text-sm font-semibold text-gray-900">Create Dataset</span>
           <div className="flex gap-2">
-            <Input 
-              placeholder="Dataset name..." 
-              value={newDatasetName} 
-              onChange={(e) => setNewDatasetName(e.target.value)} 
+            <Input
+              placeholder="Dataset name..."
+              value={newDatasetName}
+              onChange={(e) => setNewDatasetName(e.target.value)}
               className="h-8 text-sm"
             />
             <Button size="sm" onClick={handleCreateDataset} disabled={isCreating || !newDatasetName}>
               Create
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={fetchDatasets}>
+              Get Datasets
             </Button>
           </div>
         </div>
@@ -137,16 +165,16 @@ export default function DatasetsPage({ datasets, setDatasets, selectedDataset, s
                 <p className="text-sm text-gray-500 mt-1">Schema Details & Tables</p>
               </div>
               <div className="flex gap-3">
-                <Button 
-                  variant={selectedDataset === activeViewDataset ? "secondary" : "default"} 
+                <Button
+                  variant={selectedDataset === activeViewDataset ? "secondary" : "default"}
                   size="sm"
                   onClick={() => setSelectedDataset(activeViewDataset)}
                   disabled={selectedDataset === activeViewDataset}
                 >
                   {selectedDataset === activeViewDataset ? "Currently Active" : "Set as Active Dataset"}
                 </Button>
-                <Button 
-                  variant="destructive" 
+                <Button
+                  variant="destructive"
                   size="sm"
                   onClick={() => handleDeleteDataset(activeViewDataset)}
                   disabled={isDeleting}
