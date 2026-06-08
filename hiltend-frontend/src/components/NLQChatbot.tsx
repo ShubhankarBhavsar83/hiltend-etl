@@ -10,11 +10,24 @@ export interface PaginationData {
     total_pages: number;
 }
 
+export interface ChartConfig {
+    chartType: "bar" | "line" | "area" | "pie" | "donut" | "radar" | "radial";
+    xAxis: string;
+    yAxis: string[];
+}
+
 interface NLQChatbotProps {
     datasetName: string;
     selectedColumns: string[];
-    onDataResult: (data: Record<string, string | number | boolean | null>[], columns: string[], pagination: PaginationData) => void;
-    
+    enableCharts?: boolean;
+    onDataResult: (
+        data: Record<string, string | number | boolean | null>[],
+        columns: string[],
+        pagination: PaginationData,
+        sql: string,
+        chartConfig?: ChartConfig
+    ) => void;
+
 }
 
 interface Message {
@@ -23,7 +36,7 @@ interface Message {
     sql?: string;
 }
 
-export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQChatbotProps) {
+export function NLQChatbot({ datasetName, selectedColumns, enableCharts, onDataResult }: NLQChatbotProps) {
     const apiClient = useApiClient();
     const [messages, setMessages] = useState<Message[]>([
         { role: 'assistant', text: 'Ask me a question about your data, or select columns on the left to focus the query.' }
@@ -40,7 +53,7 @@ export function NLQChatbot({ datasetName, selectedColumns, onDataResult }: NLQCh
         navigator.clipboard.writeText(text);
     };
 
-const handleSend = async (overrideText?: string | React.MouseEvent) => {
+    const handleSend = async (overrideText?: string | React.MouseEvent) => {
         const userMsg = typeof overrideText === 'string' ? overrideText : input;
         if (!userMsg.trim() || !datasetName) return;
 
@@ -49,20 +62,26 @@ const handleSend = async (overrideText?: string | React.MouseEvent) => {
         setIsLoading(true);
 
         try {
-            const response = await apiClient.post(`/api/v1/datasets/${datasetName}/nlq`, {
-                prompt: userMsg,
+            const endpoint = enableCharts
+                ? `/api/v1/datasets/${datasetName}/nlq-chart`
+                : `/api/v1/datasets/${datasetName}/nlq`;
+
+            const res = await apiClient.post(endpoint, {
+                prompt: input,
                 selected_columns: selectedColumns
             });
 
-            const { data, columns, sql, pagination } = response.data;
+        // Fixed 'response' typo and extracted chart_config
+        const { data, columns, sql, pagination, chart_config } = res.data;
 
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                text: 'Here are the results! I ran the following query:',
-                sql: sql
-            }]);
+        setMessages(prev => [...prev, {
+            role: 'assistant',
+            text: 'Here are the results! I ran the following query:',
+            sql: sql
+        }]);
 
-            onDataResult(data, columns, pagination);
+        // Pass sql and chart_config back to the parent
+        onDataResult(data, columns, pagination, sql, chart_config);
 
         } catch (error: unknown) {
             if (axios.isAxiosError(error)) {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
-import { NLQChatbot } from './NLQChatbot';
+import { NLQChatbot, type ChartConfig } from './NLQChatbot';
 import { useApiClient } from "../hooks/useApiClient";
 import { cn } from "@/lib/utils";
 import DataVisualizer from "./DataVisualizer";
@@ -45,6 +46,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const [executedQueryText, setExecutedQueryText] = useState<string>("");
     const [pageSize, setPageSize] = useState(100);
     const [viewMode, setViewMode] = useState<"table" | "ai_query" | null>(null);
+    const [suggestedChartConfig, setSuggestedChartConfig] = useState<ChartConfig | null>(null);
 
     // Cross-Table Custom Selection State (Stores keys formatted as "TableName.ColumnName")
     const [customSelectedColumns, setCustomSelectedColumns] = useState<string[]>([]);
@@ -183,7 +185,9 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         setSortConfig(null);
 
         try {
-            const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/custom-view`, { columns: customSelectedColumns });
+            const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/custom-view`, {
+                columns: customSelectedColumns
+            });
 
             setActiveTableColumns(res.data.columns);
             setActiveTableData(res.data.data);
@@ -438,12 +442,33 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
 
                 {/* Dynamic Sortable Table Canvas */}
                 <div className="flex-1 overflow-auto p-4 bg-gray-50/30 flex flex-col relative z-0" onClick={() => setIsColumnMenuOpen(false)}>
+
+                    {/* AI Chart Suggestion Banner */}
+                    {viewMode === "ai_query" && suggestedChartConfig && (
+                        <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 mb-4 flex items-center justify-between shadow-sm">
+                            <div className="flex items-center gap-2 text-sm text-indigo-800">
+                                <BarChart2 size={16} />
+                                <span>The AI generated a <b>{suggestedChartConfig.chartType} chart</b> visualizing <b>{suggestedChartConfig.xAxis}</b>.</span>
+                            </div>
+                            <Button
+                                size="sm"
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white h-8"
+                                onClick={() => { setIsVisualizerOpen(true); console.log("hit") }}
+
+
+                            >
+                                View Suggested Chart
+                            </Button>
+                        </div>
+                    )}
+
                     {isVisualizerOpen && executedQueryText && (
                         <DataVisualizer
                             datasetName={selectedDataset}
                             sql={executedQueryText}
                             availableColumns={activeTableColumns}
                             onClose={() => setIsVisualizerOpen(false)}
+                            initialConfig={suggestedChartConfig ?? undefined}
                         />
                     )}
 
@@ -590,7 +615,8 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                         <NLQChatbot
                             datasetName={selectedDataset}
                             selectedColumns={visibleColumns}
-                            onDataResult={(data, columns, pagination) => {
+                            enableCharts={true}
+                            onDataResult={(data, columns, pagination, sql, chartConfig) => {
                                 setActiveTableData(data);
                                 setActiveTableColumns(columns);
                                 setActiveTableName(null);
@@ -598,6 +624,8 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                 setCurrentPage(pagination.current_page);
                                 setTotalPages(pagination.total_pages);
                                 setTotalRecords(pagination.total_records);
+                                setExecutedQueryText(sql);
+                                setSuggestedChartConfig(chartConfig || null);
                                 setViewMode("ai_query");
                             }}
                         />
@@ -624,7 +652,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                     Specific Instructions (Optional)
                                 </label>
                                 <textarea
-                                    className="w-full h-20 p-3 border border-gray-200 rounded-md text-[13px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
+                                    className="w-full h-20 p-3 border border-gray-200 rounded-md text-[13px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-50/50 resize-none"
                                     placeholder="e.g., 'Focus entirely on revenue drops in Q3', or 'Highlight anomalies in age distribution...'"
                                     value={summaryContextInput}
                                     onChange={(e) => setSummaryContextInput(e.target.value)}
@@ -641,8 +669,10 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                             </Button>
 
                             {summaryText && (
-                                <div className="mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-lg text-[13.5px] text-gray-700 leading-relaxed whitespace-pre-wrap font-sans">
-                                    {summaryText}
+                                <div className="mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-lg text-[13.5px] text-gray-700 leading-relaxed font-sans prose prose-sm prose-blue max-w-none">
+                                    <ReactMarkdown>
+                                        {summaryText ?? ""}
+                                    </ReactMarkdown>
                                 </div>
                             )}
                         </div>
@@ -668,9 +698,24 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                     <SparklesIcon /> Analyzing table relationships and schema...
                                 </div>
                             ) : (
-                                <div className="text-[13.5px] text-gray-700 leading-relaxed whitespace-pre-wrap font-sans">
-                                    {datasetSummaryText}
+                                <div className="text-[13.5px] text-gray-700 leading-relaxed font-sans prose prose-sm prose-gray max-w-none">
+                                    <ReactMarkdown>
+                                        {datasetSummaryText ?? ""}
+                                    </ReactMarkdown>
                                 </div>
+                                // <ReactMarkdown
+                                //     components={{
+                                //         p: ({ className, children }: { className?: string; children?: React.ReactNode }) => (
+                                //             <p className={className}>{children}</p>
+                                //         ),
+                                //         code: ({ className, children }: { className?: string; children?: React.ReactNode }) => (
+                                //             <code className={className}>{children}</code>
+                                //         )
+                                //     }}
+                                // >
+                                //     {datasetSummaryText}
+                                // </ReactMarkdown>
+
                             )}
                         </div>
                     </div>

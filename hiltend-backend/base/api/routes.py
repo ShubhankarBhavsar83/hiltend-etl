@@ -44,7 +44,6 @@ class NLQRequest(BaseModel):
     
 class SummarizeRequest(BaseModel):
     data: List[Dict[str, Any]]
-    # sql : str
     user_context: Optional[str] = None
     
 class ChartSummarizeRequest(BaseModel):
@@ -338,6 +337,51 @@ def execute_natural_language_query(
             status_code=500, 
             detail="The AI generated an invalid query or encountered a data type mismatch. Please try rephrasing your question."
             )
+            
+@router.post("/api/v1/datasets/{dataset_name}/nlq-chart", dependencies=[Security(azure_scheme)])
+def execute_natural_language_query_with_chart(
+    dataset_name: str = Path(...), 
+    payload: NLQRequest = ..., 
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=20, le=100),
+    db: Session = Depends(get_db)
+):
+    try:
+        schema_query = text("""
+            SELECT TABLE_NAME, COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME NOT LIKE 'stg_%'
+        """)
+        schema_rows = db.execute(schema_query, {"schema_name": dataset_name}).fetchall()
+        
+        if not schema_rows:
+            raise HTTPException(status_code=404, detail="Schema not found or empty.")
+
+        tables_dict = {}
+        for row in schema_rows:
+            if row[0] not in tables_dict: tables_dict[row[0]] = []
+            tables_dict[row[0]].append(row[1])
+            
+        schema_context = "".join([f"Table: {t}\nColumns: {', '.join(cols)}\n\n" for t, cols in tables_dict.items()])
+
+        final_prompt = payload.prompt
+        if payload.selected_columns:
+            final_prompt = f"The user focused on these columns: {', '.join(payload.selected_columns)}. {payload.prompt}"
+
+        ai_response = ai_service.generate_nlq_with_chart(dataset_name, final_prompt, schema_context) 
+        
+        result = _execute_and_paginate(db, ai_response.get("sql", ""), page, page_size)
+        result["chart_config"] = {
+            "chartType": ai_response.get("chart_type", "bar"),
+            "xAxis": ai_response.get("x_axis", ""),
+            "yAxis": ai_response.get("y_axis", [])
+        }
+        
+        return result
+
+    except Exception as e:
+        print(f"[NLQ Chart Error] Execution failed: {e}")
+        raise HTTPException(status_code=500, detail="The AI failed to generate a valid chart/query. Please rephrase.")
   
     
 @router.post("/api/v1/datasets/{dataset_name}/summarize", dependencies=[Security(azure_scheme)])

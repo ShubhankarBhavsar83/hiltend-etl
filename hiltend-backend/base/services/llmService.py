@@ -239,39 +239,78 @@ class LLMService:
         
     def generate_chart_summary(self, dataset_name: str, csv_data: str, user_context: str = "", is_sampled: bool = False) -> str:
             
-            sampling_warning = ""
-            if is_sampled:
-                sampling_warning = "CRITICAL: Due to context window limits, the data provided is a SAMPLED SUBSET of the full chart dataset. Do not claim these are absolute totals; phrase your analysis as 'Based on the sampled data...' or identify trends rather than exact universal sums."
+        sampling_warning = ""
+        if is_sampled:
+            sampling_warning = "CRITICAL: Due to context window limits, the data provided is a SAMPLED SUBSET of the full chart dataset. Do not claim these are absolute totals; phrase your analysis as 'Based on the sampled data...' or identify trends rather than exact universal sums."
 
-            system_prompt = f"""
-            You are an expert Data Analyst analyzing a visualized chart dataset from the '{dataset_name}' schema. 
-            The user has provided the underlying chart data in CSV format.
+        system_prompt = f"""
+        You are an expert Data Analyst analyzing a visualized chart dataset from the '{dataset_name}' schema. 
+        The user has provided the underlying chart data in CSV format.
+        
+        {sampling_warning}
+        
+        Provide a detailed summary of this chart data. 
+        Identify key metrics, trends, anomalies, or interesting distributions.
+        Format your response cleanly using bullet points or short paragraphs. Do not echo the raw data back.
+        """
+        
+        if user_context:
+            system_prompt += f"\n\nCRITICAL USER INSTRUCTIONS TO FOCUS ON:\n{user_context}"
             
-            {sampling_warning}
+        try:
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Chart Data (CSV):\n{csv_data}"}
+                ],
+                temperature=0.3
+            )
             
-            Provide a detailed summary of this chart data. 
-            Identify key metrics, trends, anomalies, or interesting distributions.
-            Format your response cleanly using bullet points or short paragraphs. Do not echo the raw data back.
-            """
-            
-            if user_context:
-                system_prompt += f"\n\nCRITICAL USER INSTRUCTIONS TO FOCUS ON:\n{user_context}"
+            content = response.choices[0].message.content
+            if not content:
+                return "The AI returned an empty response. This is likely due to an Azure safety/content filter."
                 
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.deployment_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Chart Data (CSV):\n{csv_data}"}
-                    ],
-                    temperature=0.3
-                )
-                
-                content = response.choices[0].message.content
-                if not content:
-                    return "The AI returned an empty response. This is likely due to an Azure safety/content filter."
-                    
-                return content.strip()
-            except Exception as e:
-                print(f"Error generating chart summary: {e}")
-                raise e
+            return content.strip()
+        except Exception as e:
+            print(f"Error generating chart summary: {e}")
+            raise e
+
+    def generate_nlq_with_chart(self, dataset_name: str, user_question: str, db_schema_context: str) -> dict:
+        
+        system_prompt = f"""
+        You are an expert Azure SQL Architect and Data Analyst.
+        1. Translate the user's question into purely valid T-SQL for schema '{dataset_name}'.
+        2. Suggest the best chart type to visualize this data ("bar", "line", "area", "pie", "donut", "radar", "radial").
+        3. Identify the X-axis column and an array of Y-axis metric columns.
+        
+        CRITICAL RULES:
+        - If the user asks for a 'distribution', 'breakdown', 'count', or 'how many'(or similar terms / phrases), you MUST aggregate the data using GROUP BY and COUNT().
+        - ALIAS AGGREGATIONS: If you use an aggregate function like COUNT() or SUM(), you MUST provide a clean alias (e.g., COUNT(*) AS [RecordCount]).
+        - AXIS SELECTION (CRITICAL): 
+            * `x_axis` MUST be the categorical or grouping column (e.g., 'gender', 'nationality', 'status', etc.). NEVER use a unique identifier (like '<palceholder>_id') as the X-axis for a distribution.
+            * `y_axis` MUST be the numeric or aggregated metric (e.g., 'RecordCount', 'total_sales').
+        - AXIS EXACT MATCH: The `x_axis` and `y_axis` values in your JSON MUST exactly match the literal column names or aliases returned by your SELECT statement.
+        - Fully qualify tables: [{dataset_name}].[TableName].
+        - NO standalone ORDER BY unless using TOP.
+        - Respond ONLY in valid JSON matching this exact structure:
+          {{"sql": "SELECT [gender], COUNT(*) AS [RecordCount] FROM [{dataset_name}].[TableName] GROUP BY [gender]", "chart_type": "bar", "x_axis": "gender", "y_axis": ["RecordCount"]}}
+        
+        Current Schema:
+        {db_schema_context}
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_question}
+                ],
+                response_format={"type": "json_object"}, 
+                temperature=0.0
+            )
+            raw_content = response.choices[0].message.content.replace("```json", "").replace("```", "").strip()
+            return json.loads(raw_content)
+        except Exception as e:
+            print(f"Error generating NLQ with chart: {e}")
+            raise e
