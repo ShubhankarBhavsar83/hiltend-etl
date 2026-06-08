@@ -183,9 +183,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         setSortConfig(null);
 
         try {
-            const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/custom-view`, {
-                columns: customSelectedColumns
-            });
+            const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/custom-view`, { columns: customSelectedColumns });
 
             setActiveTableColumns(res.data.columns);
             setActiveTableData(res.data.data);

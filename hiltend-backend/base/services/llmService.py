@@ -196,18 +196,19 @@ class LLMService:
         {schema_context}
         
         YOUR RULES:
-        1. ANCHOR: The query MUST identify the relevant FACT table (the table containing IDs from multiple dimensions).
-        2. JOIN PATTERN: All DIMENSION tables must join directly to the FACT table. Do NOT join dimensions to other dimensions.
-        3. SYNTAX: Use fully qualified names: [{dataset_name}].[TableName].[ColumnName].
-        4. ALIAS DUPLICATES (CRITICAL): If the user selects columns with the exact same name from different tables (e.g., 'repo_id' from Dim_Time and 'repo_id' from Dim_Repository), you MUST alias them in the SELECT clause to guarantee unique column names (e.g., SELECT [Dim_Time].[repo_id] AS [Dim_Time_repo_id]). Un-aliased duplicates will crash the downstream pagination CTE.
-        5. NO ORDER BY (CRITICAL): You MUST NOT include an ORDER BY clause. It will crash the downstream pagination wrapper.
-        6. OUTPUT: Return ONLY the raw T-SQL. No markdown, no triple backticks, no conversational text.
-        7. Do NOT include additional tables / columns which are not relevant to the request of the user.
+        1. STRICT SELECT: The SELECT clause MUST contain ONLY the exact columns requested by the user. Do NOT add extra primary keys, foreign keys, or other non-select columns to the output.
+        2. ACCURATE JOINS: You MUST use the correct primary/foreign keys (non-select columns) in your ON clauses to accurately link the dimension tables to the fact table.
+        3. ANCHOR: The query MUST identify the relevant FACT table (the table containing IDs from multiple dimensions).
+        4. JOIN PATTERN: All DIMENSION tables must join directly to the FACT table. Do NOT join dimensions to other dimensions.
+        5. SYNTAX: Use fully qualified names: [{dataset_name}].[TableName].[ColumnName].
+        6. ALIAS DUPLICATES (CRITICAL): If requested columns share names (e.g., 'name' from Dim_User and 'name' from Dim_Product), alias them in the SELECT clause (e.g., AS [Dim_User_name]). Un-aliased duplicates will crash downstream systems.
+        7. NO ORDER BY (CRITICAL): You MUST NOT include an ORDER BY clause. It will crash the downstream pagination wrapper.
+        8. OUTPUT: Return ONLY the raw T-SQL. No markdown blocks, no triple backticks, no conversational text.
         
-        Example of correct join pattern with aliasing:
-        SELECT [Dim_A].[ID] AS [Dim_A_ID], [Dim_B].[ID] AS [Dim_B_ID], [Fact_X].[Metric]
+        Example of correct join pattern:
+        SELECT [Dim_A].[Name], [Dim_B].[Category], [Fact_X].[Metric]
         FROM [Fact_X]
-        INNER JOIN [Dim_A] ON [Fact_X].[ID] = [Dim_A].[ID]
+        INNER JOIN [Dim_A] ON [Fact_X].[A_ID] = [Dim_A].[ID]
         INNER JOIN [Dim_B] ON [Fact_X].[B_ID] = [Dim_B].[ID]
         """
         
@@ -222,7 +223,15 @@ class LLMService:
                 ],
                 temperature=0.0
             )
-            return response.choices[0].message.content.strip()
+            
+            raw_sql = response.choices[0].message.content
+            
+            # Defensive execution: Strip markdown wrappers if the LLM hallucinates them
+            safe_sql = re.sub(r"```sql\n?", "", raw_sql, flags=re.IGNORECASE)
+            safe_sql = re.sub(r"```\n?", "", safe_sql)
+            
+            return safe_sql.strip()
+            
         except Exception as e:
             print(f"Error generating join query: {e}")
             raise e

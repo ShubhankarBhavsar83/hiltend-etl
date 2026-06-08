@@ -1,11 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useApiClient } from "@/hooks/useApiClient";
 import { Button } from "@/components/ui/button";
 import {
     BarChart, Bar, LineChart, Line, AreaChart, Area,
+    PieChart, Pie, Cell, RadarChart, Radar, PolarGrid,
+    PolarAngleAxis, PolarRadiusAxis, RadialBarChart, RadialBar,
     XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
-import { Loader2, Sparkles, BarChart2, TrendingUp, Activity, X } from "lucide-react";
+import {
+    Loader2, Sparkles, BarChart2, TrendingUp, Activity,
+    X, PieChart as PieChartIcon, Target, CircleDashed
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import axios from "axios";
 
@@ -16,7 +21,7 @@ interface DataVisualizerProps {
     onClose: () => void;
 }
 
-type ChartType = "bar" | "line" | "area";
+type ChartType = "bar" | "line" | "area" | "pie" | "donut" | "radar" | "radial";
 type ChartRowData = Record<string, string | number | boolean | null>;
 
 export default function DataVisualizer({ datasetName, sql, availableColumns, onClose }: DataVisualizerProps) {
@@ -60,6 +65,60 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
         fetchFullData();
     }, [sql, datasetName, apiClient]);
 
+
+
+    const processedData = useMemo(() => {
+        if (!data || data.length === 0 || !xAxisCol || yAxisCols.length === 0) return data;
+
+        // Peek at the first valid row to determine column types
+        const sampleRow = data.find(row => row !== null) || {};
+        const isCategorical: Record<string, boolean> = {};
+
+        yAxisCols.forEach(col => {
+            if (col === "*Record Count*") {
+                isCategorical[col] = false; // Virtual metric is a generated numeric sum
+                return;
+            }
+            const val = sampleRow[col];
+            isCategorical[col] = typeof val === 'string' || typeof val === 'boolean';
+        });
+
+        const grouped: Record<string, Record<string, string | number>> = {};
+
+        data.forEach(row => {
+            // Determine the group key (X-Axis value)
+            const xVal = String(row[xAxisCol] ?? 'Unknown');
+
+            if (!grouped[xVal]) {
+                grouped[xVal] = { [xAxisCol]: xVal };
+                // Initialize metrics to 0 for this group
+                yAxisCols.forEach(col => {
+                    grouped[xVal][col] = 0;
+                });
+            }
+
+            // Aggregate metrics
+            yAxisCols.forEach(col => {
+                if (col === "*Record Count*") {
+                    grouped[xVal][col] = (grouped[xVal][col] as number) + 1;
+                    return;
+                }
+
+                const val = row[col];
+                if (val !== null && val !== undefined) {
+                    // Typecasted as number to allow arithmetic on the union type
+                    if (isCategorical[col]) {
+                        grouped[xVal][col] = (grouped[xVal][col] as number) + 1;
+                    } else {
+                        grouped[xVal][col] = (grouped[xVal][col] as number) + (Number(val) || 0);
+                    }
+                }
+            });
+        });
+
+        return Object.values(grouped);
+    }, [data, xAxisCol, yAxisCols]);
+
     const toggleYAxis = (col: string) => {
         setYAxisCols((prev) =>
             prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]
@@ -92,8 +151,85 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
             return <div className="flex items-center justify-center h-full text-gray-400 text-sm">Please select an X and Y axis.</div>;
         }
 
+        const primaryMetric = yAxisCols[0]; // Used for single-metric charts (Pie, Donut, Radial)
+
+        // --- PIE & DONUT CHARTS ---
+        if (chartType === "pie" || chartType === "donut") {
+            return (
+                <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                        <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                        <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} />
+                        <Pie
+                            data={processedData} // <-- Updated
+                            dataKey={primaryMetric}
+                            nameKey={xAxisCol}
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={120}
+                            innerRadius={chartType === "donut" ? 70 : 0}
+                            fill="#8884d8"
+                            label
+                        >
+                            {processedData.map((_, index) => (
+                                <Cell key={`cell-${index}`} fill={`hsl(${colors[index % colors.length]})`} />
+                            ))}
+                        </Pie>
+                    </PieChart>
+                </ResponsiveContainer>
+            );
+        }
+
+        // --- RADAR CHART ---
+        if (chartType === "radar") {
+            return (
+                <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={processedData}> {/* <-- Updated */}
+                        <PolarGrid stroke="hsl(var(--border))" />
+                        <PolarAngleAxis dataKey={xAxisCol} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                        <PolarRadiusAxis angle={30} domain={['auto', 'auto']} />
+                        <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                        <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} />
+                        {yAxisCols.map((col, index) => (
+                            <Radar
+                                key={col}
+                                name={col}
+                                dataKey={col}
+                                stroke={`hsl(${colors[index % colors.length]})`}
+                                fill={`hsl(${colors[index % colors.length]})`}
+                                fillOpacity={0.3}
+                            />
+                        ))}
+                    </RadarChart>
+                </ResponsiveContainer>
+            );
+        }
+
+        // --- RADIAL BAR CHART ---
+        if (chartType === "radial") {
+            const radialData = processedData.map((item, index) => ({
+                ...item,
+                fill: `hsl(${colors[index % colors.length]})`
+            }));
+
+            return (
+                <ResponsiveContainer width="100%" height="100%">
+                    <RadialBarChart cx="50%" cy="50%" innerRadius="20%" outerRadius="90%" barSize={20} data={radialData}>
+                        <RadialBar
+                            label={{ position: 'insideStart', fill: '#fff', fontSize: 11 }}
+                            background
+                            dataKey={primaryMetric}
+                        />
+                        <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                        <Legend iconSize={10} layout="vertical" verticalAlign="middle" wrapperStyle={{ right: 20, fontSize: '12px' }} />
+                    </RadialBarChart>
+                </ResponsiveContainer>
+            );
+        }
+
+        // --- CARTESIAN CHARTS (Bar, Line, Area) ---
         const ChartProps = {
-            data,
+            data: processedData, // <-- Updated
             margin: { top: 20, right: 30, left: 0, bottom: 20 },
         };
 
@@ -121,7 +257,7 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
         );
 
         const dataSeries = yAxisCols.map((col, index) => {
-            const color = colors[index % colors.length];
+            const color = `hsl(${colors[index % colors.length]})`;
             if (chartType === "bar") {
                 return <Bar key={col} dataKey={col} fill={color} radius={[4, 4, 0, 0]} />;
             }
@@ -160,9 +296,14 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
             <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-gray-100 shrink-0">
                 <div className="flex items-center gap-4">
                     <div className="flex bg-gray-100 p-1 rounded-md">
-                        <Button variant={chartType === "bar" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("bar")}><BarChart2 size={14} /></Button>
-                        <Button variant={chartType === "line" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("line")}><TrendingUp size={14} /></Button>
-                        <Button variant={chartType === "area" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("area")}><Activity size={14} /></Button>
+                        <Button title="Bar Chart" variant={chartType === "bar" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("bar")}><BarChart2 size={14} /></Button>
+                        <Button title="Line Chart" variant={chartType === "line" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("line")}><TrendingUp size={14} /></Button>
+                        <Button title="Area Chart" variant={chartType === "area" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("area")}><Activity size={14} /></Button>
+                        <div className="w-px h-4 bg-gray-300 mx-1 self-center" />
+                        <Button title="Pie Chart" variant={chartType === "pie" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("pie")}><PieChartIcon size={14} /></Button>
+                        <Button title="Donut Chart" variant={chartType === "donut" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("donut")}><CircleDashed size={14} /></Button>
+                        <Button title="Radar Chart" variant={chartType === "radar" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("radar")}><Target size={14} /></Button>
+                        <Button title="Radial Chart" variant={chartType === "radial" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setChartType("radial")}><Activity size={14} className="rotate-90" /></Button>
                     </div>
 
                     <div className="flex items-center gap-2 text-[12px]">
@@ -182,7 +323,7 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
                         <div className="relative group">
                             <Button variant="outline" size="sm" className="h-7 text-[12px] bg-white">Select Metrics ({yAxisCols.length})</Button>
                             <div className="absolute top-8 left-0 hidden group-hover:flex flex-col bg-white border border-gray-200 rounded shadow-lg p-2 z-50 min-w-[150px] max-h-60 overflow-y-auto">
-                                {availableColumns.map(col => (
+                                {["*Record Count*", ...availableColumns].map(col => (
                                     <label key={col} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
                                         <input
                                             type="checkbox"
@@ -190,7 +331,13 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
                                             checked={yAxisCols.includes(col)}
                                             onChange={() => toggleYAxis(col)}
                                         />
-                                        <span className="text-[12px] truncate">{col}</span>
+                                        <span className="text-[12px] truncate">
+                                            {col === "*Record Count*" ? (
+                                                <span className="font-semibold text-indigo-600">Count Records</span>
+                                            ) : (
+                                                col
+                                            )}
+                                        </span>
                                     </label>
                                 ))}
                             </div>
@@ -227,15 +374,19 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
                     ) : data.length === 0 ? (
                         <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">No data available.</div>
                     ) : (
-                        <div className="absolute inset-0 p-4">
-                            <div className=" h-full w-full">
+                        <div className="absolute inset-0 p-4 flex flex-col">
+                            <h3 className="text-[13px] font-semibold text-gray-700 mb-2 capitalize shrink-0 flex items-center gap-2">
+                                <BarChart2 size={14} className="text-gray-400" />
+                                {chartType} Chart
+                            </h3>
+                            <div className="flex-1 min-h-0 w-full">
                                 {renderChart()}
                             </div>
                         </div>
                     )}
                 </div>
 
-                {/* AI Summary Sidebar (Appears when summarized) */}
+                {/* AI Summary Sidebar */}
                 {summary && (
                     <div className="w-1/3 bg-indigo-50/30 border border-indigo-100 rounded-lg p-4 overflow-y-auto animate-in slide-in-from-right-4">
                         <h4 className="font-semibold text-indigo-900 text-[13px] flex items-center gap-2 mb-3">
