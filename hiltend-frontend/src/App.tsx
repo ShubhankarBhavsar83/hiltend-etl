@@ -2,9 +2,13 @@ import { useMsal, AuthenticatedTemplate, UnauthenticatedTemplate } from "@azure/
 import { loginRequest } from "./util/authConfig";
 import LoginPage from "./components/LoginPage";
 import Dashboard from "./components/Dashboard";
+import { useIngestPolling } from './hooks/useIngestPolling';
 
 
 export default function App() {
+
+  useIngestPolling();
+  
   const { instance } = useMsal();
 
   const handleLogin = () => {

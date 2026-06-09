@@ -4,7 +4,9 @@ import csv
 import io
 import uuid
 import shutil
-from fastapi import APIRouter, Depends, Query, Security, UploadFile, Form, File, Path, BackgroundTasks, HTTPException
+import json
+from datetime import datetime
+from fastapi import APIRouter, Depends, Query, Security, UploadFile, Form, File, Path, BackgroundTasks, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import text
@@ -144,48 +146,110 @@ def process_batch_sequentially(file_tasks: List[dict], dataset_name: str):
         )
         print(f"[Queue] Finished processing for {task['filename']}")
 
-def process_pipeline_background(local_path: str, safe_name: str, dataset_name: str, file_id: str):
+def process_pipeline_background(local_path: str, safe_name: str, dataset_name: str, file_id: str, username: str, batch_id: str):
+    # 1. Initialize the baseline steps
+    steps = [
+        {"name": "Stage to ADLS Bronze Layer", "key": "staging", "status": "pending"},
+        {"name": "Databricks Serverless Header Extract", "key": "extracting", "status": "pending"},
+        {"name": "Azure AI Star Schema Design", "key": "ai_mapping", "status": "pending"},
+        {"name": "PySpark ETL & Azure SQL Merge", "key": "etl_running", "status": "pending"}
+    ]
+    
+    # 2. Robust State Machine for DB Updates
+    def _update_db(overall_status: str, active_step_key: str = None, failed_step_key: str = None):
+        try:
+            target_key = failed_step_key or active_step_key
+            current_idx = next((i for i, s in enumerate(steps) if s["key"] == target_key), -1)
+
+            for i, s in enumerate(steps):
+                if overall_status == "success":
+                    s["status"] = "completed"
+                elif failed_step_key and s["key"] == failed_step_key:
+                    s["status"] = "error"
+                elif i < current_idx:
+                    s["status"] = "completed"
+                elif i == current_idx:
+                    s["status"] = "in_progress"
+                elif i > current_idx and overall_status == "failed":
+                    s["status"] = "pending"
+
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    IF EXISTS (SELECT 1 FROM JobHistory WHERE id = :id)
+                        UPDATE JobHistory SET overall_status = :status, steps_json = :steps WHERE id = :id
+                    ELSE
+                        INSERT INTO JobHistory (id, adls_file_id, username, dataset_name, overall_status, steps_json, batch_id)
+                        VALUES (:id, :adls, :usr, :ds, :status, :steps, :batch_id)
+                """), {
+                    "id": file_id,
+                    "adls": f"abfss://{settings.datalake_container_name}@{settings.datalake_account_url.replace('https://', '').split('.')[0]}.dfs.core.windows.net/{safe_name}",
+                    "usr": username,
+                    "ds": dataset_name,
+                    "status": overall_status,
+                    "steps": json.dumps(steps),
+                    "batch_id": batch_id # Add the new parameter here
+                })
+        except Exception as e:
+            print(f"[DB Log Error] {e}")
+
+    # Track the exact point of failure for the except block
+    active_step = "staging" 
+
     try:
-        PIPELINE_STATUS[file_id] = {"step": "staging", "message": "Uploading to ADLS Bronze Layer..."}
+        # --- STEP 1: ADLS STAGING ---
+        active_step = "staging"
+        PIPELINE_STATUS[file_id] = {"step": active_step, "message": "Uploading to ADLS Bronze Layer..."}
+        _update_db("in_progress", active_step_key=active_step)
+        
         target_path = upload_to_adls(local_path, safe_name)
         if not target_path: raise Exception("ADLS upload failed.")
 
-        PIPELINE_STATUS[file_id] = {"step": "extracting", "message": "Spinning up Databricks Serverless for Header Extraction..."}
+        # --- STEP 2: DATABRICKS EXTRACTION ---
+        active_step = "extracting"
+        PIPELINE_STATUS[file_id] = {"step": active_step, "message": "Spinning up Databricks Serverless for Header Extraction..."}
+        _update_db("in_progress", active_step_key=active_step)
+        
         extract_headers_via_databricks(target_path)
         headers = download_headers_from_adls(safe_name)
         
+        # Fetch existing schema context
         existing_schema_str = ""
         try:
             with engine.connect() as conn:
-                query = text("""
-                    SELECT TABLE_NAME, COLUMN_NAME 
-                    FROM INFORMATION_SCHEMA.COLUMNS 
-                    WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME NOT LIKE 'stg_%'
-                """)
+                query = text("SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME NOT LIKE 'stg_%'")
                 result = conn.execute(query, {"schema_name": dataset_name}).fetchall()
                 if result:
                     tables_dict = {}
                     for row in result:
                         if row[0] not in tables_dict: tables_dict[row[0]] = []
                         tables_dict[row[0]].append(row[1])
-                    
-                    existing_schema_str = "CURRENT SCHEMA TABLES:\n"
-                    for t, cols in tables_dict.items():
-                        existing_schema_str += f"- {t}: {', '.join(cols)}\n"
+                    existing_schema_str = "CURRENT SCHEMA TABLES:\n" + "".join([f"- {t}: {', '.join(cols)}\n" for t, cols in tables_dict.items()])
         except Exception as e:
             print(f"[Warning] Failed to fetch existing schema context: {e}")
 
-        PIPELINE_STATUS[file_id] = {"step": "ai_mapping", "message": "Azure AI Foundry is mapping the data..."}
+        # --- STEP 3: AZURE AI SCHEMA DESIGN ---
+        active_step = "ai_mapping"
+        PIPELINE_STATUS[file_id] = {"step": active_step, "message": "Azure AI Foundry is mapping the data..."}
+        _update_db("in_progress", active_step_key=active_step)
+        
         schema_map = ai_service.generate_relational_mapping(dataset_name, headers, existing_schema_str)
         schema_map_json = schema_map.model_dump_json()
 
-        PIPELINE_STATUS[file_id] = {"step": "etl_running", "message": "Triggering Databricks ETL & Azure SQL Merge..."}
+        # --- STEP 4: DATABRICKS ETL ---
+        active_step = "etl_running"
+        PIPELINE_STATUS[file_id] = {"step": active_step, "message": "Triggering Databricks ETL & Azure SQL Merge..."}
+        _update_db("in_progress", active_step_key=active_step)
+        
         run_id = trigger_spark_etl(target_path, dataset_name, schema_map_json)
         
+        # --- PIPELINE SUCCESS ---
         PIPELINE_STATUS[file_id] = {"step": "completed", "message": f"Pipeline successful! Job ID: {run_id}"}
+        _update_db("success", active_step_key=active_step)
 
     except Exception as e:
+        # --- PIPELINE FAILURE ---
         PIPELINE_STATUS[file_id] = {"step": "error", "message": f"Pipeline failed: {str(e)}"}
+        _update_db("failed", failed_step_key=active_step)
 
     finally:
         if os.path.exists(local_path):
@@ -201,7 +265,32 @@ def ensure_saved_views_table(db: Session):
             columns_json NVARCHAR(MAX)
         )
     """))
-    db.commit()   
+    db.commit()
+    
+def ensure_job_history_table(db: Session):
+    db.execute(text("""
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'JobHistory')
+        CREATE TABLE JobHistory (
+            id NVARCHAR(50) PRIMARY KEY,
+            adls_file_id NVARCHAR(MAX),
+            timestamp DATETIME DEFAULT GETDATE(),
+            username NVARCHAR(255),
+            dataset_name NVARCHAR(255),
+            overall_status NVARCHAR(50),
+            steps_json NVARCHAR(MAX)
+        )
+    """))
+    # Safe migration: Add batch_id if it doesn't exist
+    db.execute(text("""
+        IF NOT EXISTS (
+            SELECT * FROM sys.columns 
+            WHERE object_id = OBJECT_ID('JobHistory') AND name = 'batch_id'
+        )
+        BEGIN
+            ALTER TABLE JobHistory ADD batch_id NVARCHAR(50);
+        END
+    """))
+    db.commit()
     
 
 @router.post("/api/v1/datasets/{dataset_name}/views", dependencies=[Security(azure_scheme)])
@@ -546,18 +635,26 @@ def get_datasets(db: Session = Depends(get_db)):
 # --- Ingestion & Status Endpoints ---
 @router.post("/api/v1/ingest", dependencies=[Security(azure_scheme)])
 async def ingest_file(
+    request: Request,
     background_tasks: BackgroundTasks,
     dataset_name: str = Form(...),
-    files: List[UploadFile] = File(...)
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db)
 ):
+    ensure_job_history_table(db)
+    username = getattr(request.state.user, 'preferred_username', 'System User') if hasattr(request, 'state') and hasattr(request.state, 'user') else 'System User'
+
     file_tasks = []
     file_ids = []
+    
+    # 1. Generate a Single Batch ID for this entire request
+    batch_id = f"BATCH-{str(uuid.uuid4())[:8].upper()}"
 
     for file in files:
         if not file.filename.endswith(".csv"):
             continue
 
-        file_id = str(uuid.uuid4())[:8]
+        file_id = f"JOB-{str(uuid.uuid4())[:8].upper()}"
         safe_name = f"{dataset_name.strip()}_{file_id}.csv"
         local_path = os.path.join(RAW_DATA, safe_name)
 
@@ -577,11 +674,64 @@ async def ingest_file(
     if not file_tasks:
         raise HTTPException(status_code=400, detail="No valid .csv files provided.")
 
-    background_tasks.add_task(
-        process_batch_sequentially, file_tasks, dataset_name.strip()
-    )
+    for task in file_tasks:
+        background_tasks.add_task(
+            process_pipeline_background, 
+            task["local_path"], 
+            task["safe_name"], 
+            dataset_name.strip(), 
+            task["file_id"],
+            username,
+            batch_id # 2. Pass batch_id to the background task
+        )
 
     return {"status": "Accepted", "file_ids": file_ids}
+
+@router.get("/api/v1/ingest/history", dependencies=[Security(azure_scheme)])
+def get_ingest_history(db: Session = Depends(get_db)):
+    ensure_job_history_table(db)
+    try:
+        # Fetch jobs ordered by newest first (batch_id is row[7])
+        query = text("SELECT id, adls_file_id, timestamp, username, dataset_name, overall_status, steps_json, batch_id FROM JobHistory ORDER BY timestamp DESC")
+        result = db.execute(query).fetchall()
+        
+        batches_dict = {}
+        for row in result:
+            batch_id = row[7] or "BATCH-LEGACY" # Fallback for old records
+            
+            if batch_id not in batches_dict:
+                batches_dict[batch_id] = {
+                    "batchId": batch_id,
+                    "timestamp": row[2].strftime("%m/%d/%Y, %I:%M:%S %p") if row[2] else "",
+                    "user": row[3],
+                    "datasetName": row[4],
+                    "overallStatus": "success", # We calculate this dynamically below
+                    "jobs": []
+                }
+            
+            job_status = row[5]
+            batches_dict[batch_id]["jobs"].append({
+                "id": row[0],
+                "adlsFileId": row[1],
+                "overallStatus": job_status,
+                "steps": json.loads(row[6]) if row[6] else []
+            })
+            
+        # Calculate overall batch status based on its children jobs
+        batches = list(batches_dict.values())
+        for b in batches:
+            statuses = [j["overallStatus"] for j in b["jobs"]]
+            if "failed" in statuses or "error" in statuses:
+                b["overallStatus"] = "failed"
+            elif "in_progress" in statuses or "pending" in statuses:
+                b["overallStatus"] = "in_progress"
+            else:
+                b["overallStatus"] = "success"
+            
+        return {"batches": batches}
+    except Exception as e:
+        print(f"[Error] Failed to fetch history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch job history.")
 
 @router.get("/api/v1/status/{file_id}", dependencies=[Security(azure_scheme)])
 def get_status(file_id: str):

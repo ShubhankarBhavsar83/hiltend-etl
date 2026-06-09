@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import type { AccountInfo } from "@azure/msal-browser";
+import { useGlobalState } from '../context/useGlobalState';
 
 export type NavItem = "ingest" | "datasets" | "analytics";
 
@@ -47,10 +48,9 @@ const NAV_ITEMS: {
       </svg>
     ),
   },
-{
+  {
     id: "analytics",
     label: "Explorer",
-
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <line x1="18" y1="20" x2="18" y2="10" />
@@ -62,7 +62,11 @@ const NAV_ITEMS: {
 ];
 
 export default function Sidebar({ account, activeNav, onNavChange, onLogout, isOpen }: SidebarProps) {
+  const { ingest } = useGlobalState();
   const initials = (account.name ?? account.username)?.[0]?.toUpperCase() ?? "U";
+
+  // Only show if a process is active AND we are not looking at the ingest page
+  const showGlobalTracker = ingest.isActive && activeNav !== "ingest";
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -111,6 +115,31 @@ export default function Sidebar({ account, activeNav, onNavChange, onLogout, isO
               </Tooltip>
             ))}
           </nav>
+
+          {/* Global Ingest Progress Tracker */}
+          {showGlobalTracker && (
+            <div className="mb-4 p-3 bg-white/5 border border-white/10 rounded-md flex flex-col gap-2 shadow-inner">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider">
+                  Ingesting Data
+                </span>
+                <div className="w-3 h-3 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+              </div>
+              
+              <div>
+                <span className="block text-[12.5px] font-medium text-white/90 truncate">
+                  {ingest.datasetName || "Dataset"}
+                </span>
+                <span className="block text-[11px] text-gray-400 truncate mt-0.5">
+                  [{ingest.activeIndex + 1}/{ingest.fileIds.length}] {ingest.status.step}
+                </span>
+              </div>
+              
+              <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden mt-1">
+                <div className="bg-blue-600 h-full rounded-full animate-pulse w-full" />
+              </div>
+            </div>
+          )}
 
           {/* User */}
           <div className="flex items-center gap-3 pt-4 border-t border-white/8">
