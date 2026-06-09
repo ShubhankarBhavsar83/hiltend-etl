@@ -38,3 +38,12 @@ def get_db():
         yield db
     finally:
         db.close()
+        
+
+def init_db():
+    """
+    Creates all tables defined in models.py if they don't already exist.
+    """
+    from base.database.models import Base
+    print("[Database] Ensuring ORM tables exist...")
+    Base.metadata.create_all(bind=engine)

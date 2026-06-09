@@ -5,10 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from base.core.config import settings
 from base.core.security import azure_scheme
 from base.api.routes import router
+from base.database.session import init_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await azure_scheme.openid_config.load_config()
+    init_db()
     yield
 
 app = FastAPI(
