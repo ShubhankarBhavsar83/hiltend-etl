@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from 'react-markdown';
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { NLQChatbot, type ChartConfig } from './NLQChatbot';
 import { useApiClient } from "../hooks/useApiClient";
 import { cn } from "@/lib/utils";
@@ -25,7 +26,6 @@ type TableRowData = Record<string, string | number | boolean | null>;
 
 export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const apiClient = useApiClient();
-
 
     // Pane State
     const [isSchemaOpen, setIsSchemaOpen] = useState(true);
@@ -62,7 +62,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [summaryText, setSummaryText] = useState<string | null>(null);
 
-    // Dataset Architect Sumarry States
+    // Dataset Architect Summary States
     const [isDatasetSummaryModalOpen, setIsDatasetSummaryModalOpen] = useState(false);
     const [isDatasetSummarizing, setIsDatasetSummarizing] = useState(false);
     const [datasetSummaryText, setDatasetSummaryText] = useState<string | null>(null);
@@ -72,6 +72,38 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
     const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
 
     const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
+
+    // Saved View States
+    const [savedViews, setSavedViews] = useState<{ name: string, columns: string[] }[]>([]);
+    const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+    const [newViewName, setNewViewName] = useState("");
+
+
+    // Fetch views on mount
+    useEffect(() => {
+        const fetchViews = async () => {
+            try {
+                const res = await apiClient.get(`/api/v1/datasets/${selectedDataset}/views`);
+                setSavedViews(res.data.views);
+            } catch (e) { 
+                console.error("Failed to load views", e); 
+            }
+        };
+        if (selectedDataset) {
+            fetchViews();
+        }
+    }, [apiClient, selectedDataset]);
+
+    const handleSaveView = async () => {
+        if (!newViewName) return;
+        await apiClient.post(`/api/v1/datasets/${selectedDataset}/views`, {
+            name: newViewName,
+            columns: customSelectedColumns
+        });
+        setSavedViews(prev => [...prev, { name: newViewName, columns: customSelectedColumns }]);
+        setIsSaveModalOpen(false);
+        setNewViewName("");
+    };
 
     const handleSummarizeDataset = async () => {
         setIsDatasetSummaryModalOpen(true);
@@ -89,11 +121,9 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         }
     };
 
-
     const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
     };
-
 
     const handleExecuteSummary = async () => {
         if (activeTableData.length === 0) return;
@@ -178,15 +208,18 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
         }
     };
 
-    const handleExecuteCustomView = async () => {
-        if (customSelectedColumns.length === 0) return;
+    // Modified to optionally accept pre-defined columns (for Saved Views execution)
+    const handleExecuteCustomView = async (columnsToExecute?: string[]) => {
+        const cols = Array.isArray(columnsToExecute) ? columnsToExecute : customSelectedColumns;
+        if (cols.length === 0) return;
+        
         setIsLoadingData(true);
         setActiveTableName(null);
         setSortConfig(null);
 
         try {
             const res = await apiClient.post(`/api/v1/datasets/${selectedDataset}/custom-view`, {
-                columns: customSelectedColumns
+                columns: cols
             });
 
             setActiveTableColumns(res.data.columns);
@@ -349,6 +382,27 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                             </div>
                         ))
                     )}
+
+                    {/* Saved Views Sidebar Section */}
+                    {savedViews.length > 0 && (
+                        <div className="mt-6 pt-4 border-t border-gray-200">
+                            <span className="text-[11px] font-semibold text-gray-500 uppercase px-3">Saved Views</span>
+                            <div className="mt-2 flex flex-col gap-1 px-2">
+                                {savedViews.map(view => (
+                                    <button
+                                        key={view.name}
+                                        onClick={() => {
+                                            setCustomSelectedColumns(view.columns);
+                                            handleExecuteCustomView(view.columns);
+                                        }}
+                                        className="text-[13px] text-left px-2 py-1.5 hover:bg-gray-100 rounded text-gray-700 transition-colors"
+                                    >
+                                        {view.name}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -372,14 +426,19 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
 
                     <div className="flex items-center gap-2">
                         {customSelectedColumns.length > 0 && (
-                            <Button
-                                onClick={handleExecuteCustomView}
-                                disabled={isLoadingData}
-                                size="sm"
-                                className="h-7 text-[12px] bg-blue-600 hover:bg-blue-700 text-white font-medium flex gap-1.5 items-center shadow-sm animate-pulse"
-                            >
-                                Show Custom Data ({customSelectedColumns.length} columns)
-                            </Button>
+                            <div className="flex gap-2">
+                                <Button onClick={() => setIsSaveModalOpen(true)} variant="outline" size="sm" className="h-7 text-[12px]">
+                                    Save View
+                                </Button>
+                                <Button
+                                    onClick={() => handleExecuteCustomView()}
+                                    disabled={isLoadingData}
+                                    size="sm"
+                                    className="h-7 text-[12px] bg-blue-600 hover:bg-blue-700 text-white font-medium flex gap-1.5 items-center shadow-sm animate-pulse"
+                                >
+                                    Show Custom Data ({customSelectedColumns.length} columns)
+                                </Button>
+                            </div>
                         )}
 
                         {activeTableColumns.length > 0 && (
@@ -453,9 +512,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                             <Button
                                 size="sm"
                                 className="bg-indigo-600 hover:bg-indigo-700 text-white h-8"
-                                onClick={() => { setIsVisualizerOpen(true); console.log("hit") }}
-
-
+                                onClick={() => setIsVisualizerOpen(true)}
                             >
                                 View Suggested Chart
                             </Button>
@@ -531,7 +588,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                                 onChange={(e) => {
                                                     const newSize = Number(e.target.value);
                                                     setPageSize(newSize);
-                                                    fetchPaginatedData(1, newSize); // Automatically handles both view modes
+                                                    fetchPaginatedData(1, newSize);
                                                 }}
                                                 className="border border-gray-200 rounded px-1 py-0.5 text-[11px] bg-white focus:outline-none focus:border-blue-500 text-gray-700 cursor-pointer"
                                             >
@@ -583,7 +640,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                 </div>
             </div>
 
-
             {/* RIGHT PANE: Chatbot (Collapsible Resizable Overlay) */}
             <div
                 className={cn(
@@ -633,6 +689,26 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                 </div>
             </div>
 
+            {/* Save View Modal */}
+            {isSaveModalOpen && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
+                    <div className="bg-white p-5 rounded-xl shadow-2xl border border-gray-200 w-80">
+                        <h4 className="text-sm font-semibold mb-3">Save Custom View</h4>
+                        <Input 
+                            value={newViewName} 
+                            onChange={(e) => setNewViewName(e.target.value)} 
+                            placeholder="e.g., Monthly Sales Report" 
+                            className="mb-4"
+                        />
+                        <div className="flex justify-end gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => setIsSaveModalOpen(false)}>Cancel</Button>
+                            <Button size="sm" onClick={handleSaveView} disabled={!newViewName}>Save</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Data Summarise Modal */}
             {isSummarizeModalOpen && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-[2px] p-4">
                     <div className="bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col max-w-2xl w-full max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -681,6 +757,7 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                 </div>
             )}
 
+            {/* Dataset Summarise Modal */}
             {isDatasetSummaryModalOpen && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-[2px] p-4">
                     <div className="bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col max-w-2xl w-full max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -703,19 +780,6 @@ export default function DataExplorer({ selectedDataset }: DataExplorerProps) {
                                         {datasetSummaryText ?? ""}
                                     </ReactMarkdown>
                                 </div>
-                                // <ReactMarkdown
-                                //     components={{
-                                //         p: ({ className, children }: { className?: string; children?: React.ReactNode }) => (
-                                //             <p className={className}>{children}</p>
-                                //         ),
-                                //         code: ({ className, children }: { className?: string; children?: React.ReactNode }) => (
-                                //             <code className={className}>{children}</code>
-                                //         )
-                                //     }}
-                                // >
-                                //     {datasetSummaryText}
-                                // </ReactMarkdown>
-
                             )}
                         </div>
                     </div>

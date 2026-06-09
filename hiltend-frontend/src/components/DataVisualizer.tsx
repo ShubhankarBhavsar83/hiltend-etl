@@ -7,7 +7,7 @@ import {
     BarChart, Bar, LineChart, Line, AreaChart, Area,
     PieChart, Pie, Cell, RadarChart, Radar, PolarGrid,
     PolarAngleAxis, PolarRadiusAxis, RadialBarChart, RadialBar,
-    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+    XAxis, YAxis, CartesianGrid, Tooltip, Legend
 } from "recharts";
 import {
     Loader2, Sparkles, BarChart2, TrendingUp, Activity,
@@ -35,9 +35,11 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Chart Config State
+    // Chart Config State (Supports Multiple X and Y Axes)
     const [chartType, setChartType] = useState<ChartType>(initialConfig?.chartType || "bar");
-    const [xAxisCol, setXAxisCol] = useState<string>(initialConfig?.xAxis || availableColumns[0] || "");
+    const [xAxisCols, setXAxisCols] = useState<string[]>(
+        initialConfig?.xAxis ? [initialConfig.xAxis] : (availableColumns.length > 0 ? [availableColumns[0]] : [])
+    );
     const [yAxisCols, setYAxisCols] = useState<string[]>(
         initialConfig?.yAxis && initialConfig.yAxis.length > 0
             ? initialConfig.yAxis
@@ -47,6 +49,27 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
     // Summary State
     const [summary, setSummary] = useState<string | null>(null);
     const [isSummarizing, setIsSummarizing] = useState(false);
+
+    // Responsive Container State using Callback Ref to handle conditional mounting
+    const [chartContainerNode, setChartContainerNode] = useState<HTMLDivElement | null>(null);
+    const [chartDimensions, setChartDimensions] = useState({ width: 800, height: 400 });
+
+    // Measure the exact container bounds to feed static pixels to Recharts
+    useEffect(() => {
+        if (!chartContainerNode) return;
+        
+        const observer = new ResizeObserver((entries) => {
+            if (entries.length > 0) {
+                const { width, height } = entries[0].contentRect;
+                if (width > 0 && height > 0) {
+                    setChartDimensions({ width, height });
+                }
+            }
+        });
+        
+        observer.observe(chartContainerNode);
+        return () => observer.disconnect();
+    }, [chartContainerNode]);
 
     // Fetch full dataset
     useEffect(() => {
@@ -70,7 +93,7 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
 
     // Aggregation Engine
     const processedData = useMemo(() => {
-        if (!data || data.length === 0 || !xAxisCol || yAxisCols.length === 0) return data;
+        if (!data || data.length === 0 || xAxisCols.length === 0 || yAxisCols.length === 0) return data;
 
         const sampleRow = data.find(row => row !== null) || {};
         const isCategorical: Record<string, boolean> = {};
@@ -87,10 +110,10 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
         const grouped: Record<string, Record<string, string | number>> = {};
 
         data.forEach(row => {
-            const xVal = String(row[xAxisCol] ?? 'Unknown');
+            const xVal = xAxisCols.map(col => String(row[col] ?? 'Unknown')).join(' | ');
 
             if (!grouped[xVal]) {
-                grouped[xVal] = { [xAxisCol]: xVal };
+                grouped[xVal] = { display_label: xVal };
                 yAxisCols.forEach(col => { grouped[xVal][col] = 0; });
             }
 
@@ -111,7 +134,7 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
         });
 
         return Object.values(grouped);
-    }, [data, xAxisCol, yAxisCols]);
+    }, [data, xAxisCols, yAxisCols]);
 
     const toggleYAxis = (col: string) => {
         setYAxisCols((prev) =>
@@ -136,19 +159,39 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
 
     const colors = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"];
 
+    // Decoupled wrappers to ensure text scales with zoom
     const ZoomableContainer = ({ children }: { children: React.ReactNode }) => (
         <TransformWrapper initialScale={1} minScale={0.5} maxScale={4} centerOnInit={true}>
             <TransformComponent 
                 wrapperStyle={{ width: "100%", height: "100%", cursor: "grab" }}
-                contentStyle={{ width: "100%", height: "100%" }}
+                contentStyle={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}
             >
                 {children}
             </TransformComponent>
         </TransformWrapper>
     );
 
+    const ChartWrapper = ({ children }: { children: React.ReactNode }) => (
+        <div style={{ width: chartDimensions.width, height: chartDimensions.height }}>
+            {children}
+        </div>
+    );
+
+    // Standardized solid background tooltip
+    const renderTooltip = () => (
+        <Tooltip 
+            contentStyle={{ 
+                borderRadius: '8px', 
+                border: '1px solid var(--border)', 
+                backgroundColor: 'var(--background)',
+                color: 'var(--foreground)'
+            }} 
+            itemStyle={{ color: 'var(--foreground)' }}
+        />
+    );
+
     const renderChart = () => {
-        if (!xAxisCol || yAxisCols.length === 0) {
+        if (xAxisCols.length === 0 || yAxisCols.length === 0) {
             return <div className="flex items-center justify-center h-full text-gray-400 text-sm">Please select X and Y axes.</div>;
         }
 
@@ -158,17 +201,17 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
         if (chartType === "pie" || chartType === "donut") {
             return (
                 <ZoomableContainer>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--background))' }} />
+                    <ChartWrapper>
+                        <PieChart width={chartDimensions.width} height={chartDimensions.height}>
+                            {renderTooltip()}
                             <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} />
-                            <Pie data={processedData} dataKey={primaryMetric} nameKey={xAxisCol} cx="50%" cy="50%" outerRadius={120} innerRadius={chartType === "donut" ? 70 : 0} fill="#8884d8" label>
+                            <Pie data={processedData} dataKey={primaryMetric} nameKey="display_label" cx="50%" cy="50%" outerRadius={Math.min(chartDimensions.width, chartDimensions.height) / 3} innerRadius={chartType === "donut" ? Math.min(chartDimensions.width, chartDimensions.height) / 5 : 0} fill="#8884d8" label>
                                 {processedData.map((_, index) => (
                                     <Cell key={`cell-${index}`} fill={`var(--color-${colors[index % colors.length]})`} />
                                 ))}
                             </Pie>
                         </PieChart>
-                    </ResponsiveContainer>
+                    </ChartWrapper>
                 </ZoomableContainer>
             );
         }
@@ -177,18 +220,18 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
         if (chartType === "radar") {
             return (
                 <ZoomableContainer>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <RadarChart cx="50%" cy="50%" outerRadius="80%" data={processedData}>
-                            <PolarGrid stroke="hsl(var(--border))" />
-                            <PolarAngleAxis dataKey={xAxisCol} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                    <ChartWrapper>
+                        <RadarChart width={chartDimensions.width} height={chartDimensions.height} cx="50%" cy="50%" outerRadius="80%" data={processedData}>
+                            <PolarGrid stroke="var(--border)" />
+                            <PolarAngleAxis dataKey="display_label" tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} />
                             <PolarRadiusAxis angle={30} domain={['auto', 'auto']} />
-                            <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--background))' }} />
+                            {renderTooltip()}
                             <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} />
                             {yAxisCols.map((col, index) => (
                                 <Radar key={col} name={col} dataKey={col} stroke={`var(--color-${colors[index % colors.length]})`} fill={`var(--color-${colors[index % colors.length]})`} fillOpacity={0.3} />
                             ))}
                         </RadarChart>
-                    </ResponsiveContainer>
+                    </ChartWrapper>
                 </ZoomableContainer>
             );
         }
@@ -198,25 +241,25 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
             const radialData = processedData.map((item, index) => ({ ...item, fill: `var(--color-${colors[index % colors.length]})` }));
             return (
                 <ZoomableContainer>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <RadialBarChart cx="50%" cy="50%" innerRadius="20%" outerRadius="90%" barSize={20} data={radialData}>
+                    <ChartWrapper>
+                        <RadialBarChart width={chartDimensions.width} height={chartDimensions.height} cx="50%" cy="50%" innerRadius="20%" outerRadius="90%" barSize={20} data={radialData}>
                             <RadialBar label={{ position: 'insideStart', fill: '#fff', fontSize: 11 }} background dataKey={primaryMetric} />
-                            <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--background))' }} />
+                            {renderTooltip()}
                             <Legend iconSize={10} layout="vertical" verticalAlign="middle" wrapperStyle={{ right: 20, fontSize: '12px' }} />
                         </RadialBarChart>
-                    </ResponsiveContainer>
+                    </ChartWrapper>
                 </ZoomableContainer>
             );
         }
 
         // --- CARTESIAN ---
-        const ChartProps = { data: processedData, margin: { top: 20, right: 30, left: 0, bottom: 20 } };
+        const ChartProps = { data: processedData, width: chartDimensions.width, height: chartDimensions.height, margin: { top: 20, right: 30, left: 0, bottom: 20 } };
         const commonAxes = (
             <>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey={xAxisCol} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} dy={10} />
-                <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} dx={-10} />
-                <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--background))' }} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="display_label" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} dy={10} />
+                <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} dx={-10} />
+                {renderTooltip()}
                 <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} />
             </>
         );
@@ -231,11 +274,11 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
 
         return (
             <ZoomableContainer>
-                <ResponsiveContainer width="100%" height="100%">
+                <ChartWrapper>
                     {chartType === "bar" ? <BarChart {...ChartProps}>{commonAxes}{dataSeries}</BarChart> :
                         chartType === "line" ? <LineChart {...ChartProps}>{commonAxes}{dataSeries}</LineChart> :
                             <AreaChart {...ChartProps}>{commonAxes}{dataSeries}</AreaChart>}
-                </ResponsiveContainer>
+                </ChartWrapper>
             </ZoomableContainer>
         );
     };
@@ -259,17 +302,29 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
 
                     <div className="flex items-center gap-2 text-[12px]">
                         <span className="font-semibold text-gray-600">X-Axis:</span>
-                        <select className="border border-gray-200 rounded px-2 py-1 bg-white focus:ring-blue-500" value={xAxisCol} onChange={(e) => setXAxisCol(e.target.value)}>
-                            <option value="">Select...</option>
-                            {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
-                        </select>
+                        <div className="relative group">
+                            <Button variant="outline" size="sm" className="h-7 text-[12px] bg-white">Select X ({xAxisCols.length})</Button>
+                            <div className="absolute top-8 left-0 flex flex-col bg-white border border-gray-200 rounded shadow-lg p-2 z-50 min-w-[150px] max-h-60 overflow-y-auto invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-all duration-300 delay-[2000ms] group-hover:delay-0">
+                                {availableColumns.map(col => (
+                                    <label key={col} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                        <input 
+                                            type="checkbox" 
+                                            className="rounded border-gray-300 text-blue-600" 
+                                            checked={xAxisCols.includes(col)} 
+                                            onChange={() => setXAxisCols(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col])} 
+                                        />
+                                        <span className="text-[12px] truncate">{col}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
                     </div>
 
                     <div className="flex items-center gap-2 text-[12px]">
                         <span className="font-semibold text-gray-600">Y-Axis (Metrics):</span>
                         <div className="relative group">
                             <Button variant="outline" size="sm" className="h-7 text-[12px] bg-white">Select Metrics ({yAxisCols.length})</Button>
-                            <div className="absolute top-8 left-0 hidden group-hover:flex flex-col bg-white border border-gray-200 rounded shadow-lg p-2 z-50 min-w-[150px] max-h-60 overflow-y-auto">
+                            <div className="absolute top-8 left-0 flex flex-col bg-white border border-gray-200 rounded shadow-lg p-2 z-50 min-w-[150px] max-h-60 overflow-y-auto invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-all duration-300 delay-[2000ms] group-hover:delay-0">
                                 {["*Record Count*", ...availableColumns].map(col => (
                                     <label key={col} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
                                         <input type="checkbox" className="rounded border-gray-300 text-blue-600" checked={yAxisCols.includes(col)} onChange={() => toggleYAxis(col)} />
@@ -302,7 +357,7 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
                             <h3 className="text-[13px] font-semibold text-gray-700 mb-2 capitalize shrink-0 flex items-center gap-2">
                                 <BarChart2 size={14} className="text-gray-400" /> {chartType} Chart
                             </h3>
-                            <div className="flex-1 min-h-0 w-full">
+                            <div ref={setChartContainerNode} className="flex-1 min-h-0 w-full bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] rounded-lg border border-gray-100 relative">
                                 {renderChart()}
                             </div>
                         </div>
@@ -312,7 +367,7 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
                 {summary && (
                     <div className="w-1/3 bg-indigo-50/30 border border-indigo-100 rounded-lg p-4 overflow-y-auto animate-in slide-in-from-right-4">
                         <h4 className="font-semibold text-indigo-900 text-[13px] flex items-center gap-2 mb-3"><Sparkles size={14} /> AI Analysis</h4>
-                        <div className="prose prose-sm prose-indigo max-w-none">
+                        <div className="prose prose-sm prose-indigo max-w-none text-[13px] text-gray-700 leading-relaxed font-sans">
                             <ReactMarkdown>
                                 {summary ?? ""}
                             </ReactMarkdown>
@@ -320,6 +375,8 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
                     </div>
                 )}
             </div>
+            {/* Resizer Handle Hint */}
+            <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize bg-[linear-gradient(135deg,transparent_50%,rgba(0,0,0,0.1)_50%)]" />
         </div>
     );
 }

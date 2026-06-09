@@ -53,6 +53,9 @@ class ChartSummarizeRequest(BaseModel):
 class QueryExecutionRequest(BaseModel):
     sql: str
     
+class SaveViewRequest(BaseModel):
+    name: str
+    columns: list[str]
     
 def _execute_and_paginate(db: Session, sql: str, page: int, page_size: int):
     clean_sql_upper = sql.upper().strip()
@@ -188,8 +191,37 @@ def process_pipeline_background(local_path: str, safe_name: str, dataset_name: s
         if os.path.exists(local_path):
             os.remove(local_path)
 
+def ensure_saved_views_table(db: Session):
+    db.execute(text("""
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SavedViews')
+        CREATE TABLE SavedViews (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            dataset_name NVARCHAR(255),
+            view_name NVARCHAR(255),
+            columns_json NVARCHAR(MAX)
+        )
+    """))
+    db.commit()   
     
-    
+
+@router.post("/api/v1/datasets/{dataset_name}/views", dependencies=[Security(azure_scheme)])
+def save_view(dataset_name: str, payload: SaveViewRequest, db: Session = Depends(get_db)):
+    ensure_saved_views_table(db)
+    import json
+    db.execute(text("""
+        INSERT INTO SavedViews (dataset_name, view_name, columns_json) 
+        VALUES (:d, :n, :c)
+    """), {"d": dataset_name, "n": payload.name, "c": json.dumps(payload.columns)})
+    db.commit()
+    return {"status": "success"}
+
+@router.get("/api/v1/datasets/{dataset_name}/views", dependencies=[Security(azure_scheme)])
+def list_views(dataset_name: str, db: Session = Depends(get_db)):
+    ensure_saved_views_table(db)
+    import json
+    result = db.execute(text("SELECT view_name, columns_json FROM SavedViews WHERE dataset_name = :d"), {"d": dataset_name}).fetchall()
+    return {"views": [{"name": r[0], "columns": json.loads(r[1])} for r in result]}
+
 # --- NEW ENDPOINT: Fetch full dataset for charts ---
 @router.post("/api/v1/datasets/{dataset_name}/execute-full", dependencies=[Security(azure_scheme)])
 def execute_full_query(
@@ -259,6 +291,8 @@ def execute_paginated_query(
         return _execute_and_paginate(db, payload.sql, page, page_size)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
+
+
 
 
 @router.post("/api/v1/datasets/{dataset_name}/explain-schema", dependencies=[Security(azure_scheme)])
