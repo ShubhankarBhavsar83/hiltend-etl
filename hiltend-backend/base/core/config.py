@@ -39,6 +39,6 @@ class Settings(BaseSettings):
 settings = Settings()
 
 if settings.environment == "cloud":
-    print("Azure environment:..")
+    print("[Config] Azure environment:..")
 else:
-    print("Local environment:..")
+    print("[Config] Local environment:..")

@@ -77,7 +77,7 @@ export default function Sidebar({ account, activeNav, onNavChange, onLogout, isO
           isOpen ? "translate-x-0 w-55" : "-translate-x-full md:translate-x-0 w-55 md:w-0 overflow-hidden"
         )}
       >
-        <div className="w-55 p-5 flex flex-col h-full min-w-[220px]">
+        <div className="w-55 p-5 flex flex-col h-full min-w-55">
           
           <div className="flex items-center gap-2 text-base font-semibold px-2 pb-6">
             <span className="inline-flex items-center justify-center w-6.5 h-6.5 bg-blue-600 rounded-sm font-semibold text-[13px] text-white">

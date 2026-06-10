@@ -131,7 +131,7 @@ export function NLQChatbot({ datasetName, selectedColumns, enableCharts, onDataR
                                 )}
                             </div>
 
-                            <span className="whitespace-pre-wrap font-sans break-words">{msg.text}</span>
+                            <span className="whitespace-pre-wrap font-sans wrap-break-word">{msg.text}</span>
 
                             {msg.sql && (
                                 <div className="mt-3 p-3 bg-slate-900 text-slate-50 font-mono text-xs rounded-md border border-slate-700 overflow-x-auto shadow-inner relative group/sql">

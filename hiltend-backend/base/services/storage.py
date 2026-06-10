@@ -3,7 +3,6 @@ from azure.storage.filedatalake import DataLakeServiceClient
 from azure.identity import DefaultAzureCredential, ClientSecretCredential
 from base.core.config import settings
 
-# --- Dynamically assign credentials based on environment ---
 if settings.environment == "cloud":
     _credential = DefaultAzureCredential()
 else:
@@ -21,9 +20,6 @@ datalake_client = DataLakeServiceClient(
 
 
 def upload_to_adls(local_path: str, remote_filename: str) -> str:
-    """
-    Upload a local file to the ADLS Gen2 bronze container.
-    """
     container = datalake_client.get_file_system_client(
         file_system=settings.datalake_container_name
     )
@@ -32,7 +28,6 @@ def upload_to_adls(local_path: str, remote_filename: str) -> str:
     with open(local_path, "rb") as data:
         file_client.upload_data(data, overwrite=True)
 
-    # Note: Databricks prefers the abfss:// protocol for ADLS
     account_name = settings.datalake_account_url.replace("https://", "").split(".")[0]
     
     adls_path = f"abfss://{settings.datalake_container_name}@{account_name}.dfs.core.windows.net/{remote_filename}"
@@ -42,11 +37,6 @@ def upload_to_adls(local_path: str, remote_filename: str) -> str:
 
 
 def download_headers_from_adls(remote_filename: str) -> list:
-    """
-    Reaches into ADLS, downloads the dropped JSON file, 
-    and returns the headers as a Python list.
-    """
-    # matching naming convention in databricks
     headers_filename = remote_filename.replace(".csv", "_headers.json")
     
     container = datalake_client.get_file_system_client(

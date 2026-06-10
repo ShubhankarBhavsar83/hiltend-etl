@@ -1,4 +1,7 @@
 import urllib
+import time
+from sqlalchemy.exc import OperationalError
+from sqlalchemy import text
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from base.core.config import settings
@@ -42,8 +45,29 @@ def get_db():
 
 def init_db():
     """
-    Creates all tables defined in models.py if they don't already exist.
+    Wakes up the database (handles Serverless auto-pause) and creates tables.
     """
     from base.database.models import Base
+    print("[Database] Initiating wakeup sequence...")
+    
+    max_retries = 30  
+    delay = 5
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            print("[Database] Connection established. Database is awake.")
+            break
+        except OperationalError:
+            print(f"[Database] Asleep or unavailable (Attempt {attempt}/{max_retries}). Waiting {delay}s...")
+            time.sleep(delay)
+    else:
+        print("[Database] CRITICAL: Database failed to wake up after multiple attempts.")
+        
     print("[Database] Ensuring ORM tables exist...")
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("[Database] ORM tables provisioned successfully.")
+    except Exception as e:
+        print(f"[Database] Failed to create tables: {e}")

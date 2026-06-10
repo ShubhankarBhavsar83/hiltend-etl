@@ -36,7 +36,7 @@ PIPELINE_STATUS = {}
 
 # --- Identity & Authorization Dependencies ---
 async def get_current_user(request: Request, db: Session = Depends(get_db), _token=Security(azure_scheme)) -> AppUser:
-    """Intercepts the Azure AD token, creates or updates the user in the database, and returns the AppUser ORM object."""
+    """Intercepts Azure token. Claims email-based 'stub' invites if they exist."""
     if not hasattr(request.state, 'user'):
         raise HTTPException(status_code=401, detail="Invalid authentication token.")
     
@@ -48,10 +48,18 @@ async def get_current_user(request: Request, db: Session = Depends(get_db), _tok
     user = db.query(AppUser).filter(AppUser.azure_oid == oid).first()
     
     if not user:
-        user = AppUser(azure_oid=oid, email=email, name=name)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        user = db.query(AppUser).filter(AppUser.email == email).first()
+        if user:
+            user.azure_oid = oid
+            user.name = name
+            db.commit()
+            db.refresh(user)
+        else:
+            # Completely new organic user
+            user = AppUser(azure_oid=oid, email=email, name=name)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
     elif user.email != email or user.name != name:
         user.email = email
         user.name = name
@@ -109,6 +117,13 @@ class QueryExecutionRequest(BaseModel):
 class SaveViewRequest(BaseModel):
     name: str
     columns: list[str]
+    
+class InviteMemberRequest(BaseModel):
+    email: str
+    role: AccessRole
+
+class UpdateMemberRequest(BaseModel):
+    role: AccessRole
     
 # --- Database Helpers ---
 def _execute_and_paginate(db: Session, sql: str, page: int, page_size: int):
@@ -774,3 +789,117 @@ def ping_services(db: Session = Depends(get_db), current_user: AppUser = Depends
     except Exception: pass
         
     return {"status": "completed", "details": status}
+
+
+# ==========================================
+# --- Collaboration & Member Management ---
+# ==========================================
+
+@router.get("/api/v1/datasets/{dataset_name}/members")
+def get_dataset_members(
+    dataset: Dataset = Depends(require_dataset_access(AccessRole.VIEWER))
+):
+    """List all members and their roles for a dataset."""
+    members = []
+    for access in dataset.access_list:
+        members.append({
+            "id": access.user.id,
+            "name": access.user.name,
+            "email": access.user.email,
+            "role": access.role.value,
+            "granted_at": access.granted_at.isoformat() if access.granted_at else None
+        })
+    return {"members": members}
+
+
+@router.post("/api/v1/datasets/{dataset_name}/members")
+def invite_member(
+    payload: InviteMemberRequest,
+    db: Session = Depends(get_db),
+    dataset: Dataset = Depends(require_dataset_access(AccessRole.ADMIN)),
+    current_user: AppUser = Depends(get_current_user)
+):
+    """Invites a user by email. Creates a stub account if they don't exist yet."""
+    # 1. Enforce Role Hierarchy
+    current_user_access = db.query(DatasetAccess).filter_by(user_id=current_user.id, dataset_id=dataset.id).first()
+    if payload.role in [AccessRole.ADMIN, AccessRole.OWNER] and current_user_access.role != AccessRole.OWNER:
+        raise HTTPException(403, "Only Owners can grant Admin or Owner roles.")
+        
+    # 2. Resolve or Create Stub User
+    target_email = payload.email.strip().lower()
+    target_user = db.query(AppUser).filter(AppUser.email == target_email).first()
+    
+    if not target_user:
+        # Create a stub user. They will claim it when they log in via Azure AD.
+        stub_oid = f"pending-{uuid.uuid4()}"
+        target_user = AppUser(azure_oid=stub_oid, email=target_email, name="Pending Invite")
+        db.add(target_user)
+        db.flush()
+        
+    # 3. Check for existing membership
+    existing_access = db.query(DatasetAccess).filter_by(user_id=target_user.id, dataset_id=dataset.id).first()
+    if existing_access:
+        raise HTTPException(400, "User is already a member of this dataset.")
+        
+    # 4. Grant Access
+    new_access = DatasetAccess(user_id=target_user.id, dataset_id=dataset.id, role=payload.role)
+    db.add(new_access)
+    db.commit()
+    
+    return {"status": "success", "message": f"{target_email} invited as {payload.role.value}."}
+
+
+@router.put("/api/v1/datasets/{dataset_name}/members/{user_id}")
+def update_member_role(
+    user_id: str,
+    payload: UpdateMemberRequest,
+    db: Session = Depends(get_db),
+    dataset: Dataset = Depends(require_dataset_access(AccessRole.ADMIN)),
+    current_user: AppUser = Depends(get_current_user)
+):
+    """Updates an existing member's role."""
+    target_access = db.query(DatasetAccess).filter_by(user_id=user_id, dataset_id=dataset.id).first()
+    if not target_access:
+        raise HTTPException(404, "Member not found in this dataset.")
+        
+    current_user_access = db.query(DatasetAccess).filter_by(user_id=current_user.id, dataset_id=dataset.id).first()
+    
+    # Enforce Hierarchy
+    if current_user_access.role != AccessRole.OWNER:
+        if target_access.role in [AccessRole.ADMIN, AccessRole.OWNER]:
+            raise HTTPException(403, "Admins cannot modify the roles of other Admins or Owners.")
+        if payload.role in [AccessRole.ADMIN, AccessRole.OWNER]:
+            raise HTTPException(403, "Admins cannot grant Admin or Owner roles.")
+            
+    target_access.role = payload.role
+    db.commit()
+    return {"status": "success"}
+
+
+@router.delete("/api/v1/datasets/{dataset_name}/members/{user_id}")
+def remove_member(
+    user_id: str,
+    db: Session = Depends(get_db),
+    dataset: Dataset = Depends(require_dataset_access(AccessRole.ADMIN)),
+    current_user: AppUser = Depends(get_current_user)
+):
+    """Revokes a user's access to the dataset."""
+    if user_id == current_user.id:
+        raise HTTPException(400, "You cannot remove yourself.")
+        
+    target_access = db.query(DatasetAccess).filter_by(user_id=user_id, dataset_id=dataset.id).first()
+    if not target_access:
+        raise HTTPException(404, "Member not found.")
+        
+    current_user_access = db.query(DatasetAccess).filter_by(user_id=current_user.id, dataset_id=dataset.id).first()
+    
+    # Enforce Hierarchy
+    if target_access.role == AccessRole.OWNER:
+        raise HTTPException(403, "Owners cannot be removed.")
+        
+    if current_user_access.role != AccessRole.OWNER and target_access.role == AccessRole.ADMIN:
+        raise HTTPException(403, "Admins cannot remove other Admins.")
+        
+    db.delete(target_access)
+    db.commit()
+    return {"status": "success"}

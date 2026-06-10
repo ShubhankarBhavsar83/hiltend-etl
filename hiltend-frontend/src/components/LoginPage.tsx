@@ -29,18 +29,13 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             </h1>
           </div>
 
-          {/* Features */}
-          <div className="flex flex-col gap-3 pt-2 border-t border-gray-800">
-            <Feature icon="🔐" label="Zero-trust auth via Microsoft Entra ID" />
-            <Feature icon="☁️" label="Native ADLS Gen2 bronze layer staging" />
-            <Feature icon="⚡" label="Async PySpark transformation pipeline" />
-          </div>
+
         </div>
       </div>
 
       {/* Right panel — sign in */}
       {/* Swapped w-110 for w-[28rem] to use arbitrary sizing safely */}
-      <div className="w-full md:w-[28rem] shrink-0 flex items-center justify-center p-8 md:p-12 bg-white">
+      <div className="w-full md:w-md shrink-0 flex items-center justify-center p-8 md:p-12 bg-white">
         <Card className="w-full border-0 shadow-none">
           {/* Swapped p-25 for p-6 */}
           <CardHeader className="p-4 space-y-2">
@@ -76,14 +71,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   );
 }
 
-function Feature({ icon, label }: { icon: string; label: string }) {
-  return (
-    <div className="flex items-center gap-3 text-[13px] text-gray-300">
-      <span className="text-[15px] shrink-0">{icon}</span>
-      <span>{label}</span>
-    </div>
-  );
-}
 
 function MicrosoftLogo() {
   return (

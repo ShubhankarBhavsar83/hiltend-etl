@@ -304,7 +304,7 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
                         <span className="font-semibold text-gray-600">X-Axis:</span>
                         <div className="relative group">
                             <Button variant="outline" size="sm" className="h-7 text-[12px] bg-white">Select X ({xAxisCols.length})</Button>
-                            <div className="absolute top-8 left-0 flex flex-col bg-white border border-gray-200 rounded shadow-lg p-2 z-50 min-w-[150px] max-h-60 overflow-y-auto invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-all duration-300 delay-[2000ms] group-hover:delay-0">
+                            <div className="absolute top-8 left-0 flex flex-col bg-white border border-gray-200 rounded shadow-lg p-2 z-50 min-w-37.5 max-h-60 overflow-y-auto invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-all duration-300 delay-[2000ms] group-hover:delay-0">
                                 {availableColumns.map(col => (
                                     <label key={col} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
                                         <input 
@@ -324,7 +324,7 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
                         <span className="font-semibold text-gray-600">Y-Axis (Metrics):</span>
                         <div className="relative group">
                             <Button variant="outline" size="sm" className="h-7 text-[12px] bg-white">Select Metrics ({yAxisCols.length})</Button>
-                            <div className="absolute top-8 left-0 flex flex-col bg-white border border-gray-200 rounded shadow-lg p-2 z-50 min-w-[150px] max-h-60 overflow-y-auto invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-all duration-300 delay-[2000ms] group-hover:delay-0">
+                            <div className="absolute top-8 left-0 flex flex-col bg-white border border-gray-200 rounded shadow-lg p-2 z-50 min-w-37.5 max-h-60 overflow-y-auto invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-all duration-300 delay-[2000ms] group-hover:delay-0">
                                 {["*Record Count*", ...availableColumns].map(col => (
                                     <label key={col} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
                                         <input type="checkbox" className="rounded border-gray-300 text-blue-600" checked={yAxisCols.includes(col)} onChange={() => toggleYAxis(col)} />
@@ -357,7 +357,7 @@ export default function DataVisualizer({ datasetName, sql, availableColumns, onC
                             <h3 className="text-[13px] font-semibold text-gray-700 mb-2 capitalize shrink-0 flex items-center gap-2">
                                 <BarChart2 size={14} className="text-gray-400" /> {chartType} Chart
                             </h3>
-                            <div ref={setChartContainerNode} className="flex-1 min-h-0 w-full bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] rounded-lg border border-gray-100 relative">
+                            <div ref={setChartContainerNode} className="flex-1 min-h-0 w-full bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] bg-size-[16px_16px] rounded-lg border border-gray-100 relative">
                                 {renderChart()}
                             </div>
                         </div>
