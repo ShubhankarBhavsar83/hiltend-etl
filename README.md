@@ -12,18 +12,18 @@ An enterprise-grade **Cloud Medallion Data Platform** featuring automated data i
 
 ---
 
-## 🌟 Key Features
+## Key Features
 
-- **🏗 Medallion Architecture Processing**: Streamlined data flow through **Bronze** (raw landing), **Silver** (cleaned/conformed), and **Gold** (aggregated business insights) data layers.
-- **⚡ Databricks & PySpark Job Orchestration**: High-throughput distributed processing for enterprise schema inference, header extraction, and data transformations.
-- **🤖 AI-Powered Natural Language Querying (NLQ)**: Integrated Azure AI Inference & OpenAI LLMs enabling users to explore and query complex datasets using plain English.
-- **🔒 Enterprise Auth & Fine-Grained RBAC**: Azure Entra ID (MSAL PKCE) authentication with granular permissions (`VIEWER`, `USER`, `ADMIN`, `OWNER`) for dataset sharing and dataset collaboration.
-- **📊 Dynamic Data Explorer & Visualization Engine**: Real-time SQL-like filtering, custom saved views, column projections, and interactive chart visualization via Recharts.
-- **☁️ Native Azure Cloud Integration**: Utilizes Azure Data Lake Storage (ADLS Gen2), Azure Key Vault secrets management, and Azure Static Web Apps.
+- **Medallion Architecture Processing**: Streamlined data flow through **Bronze** (raw landing), **Silver** (cleaned/conformed), and **Gold** (aggregated business insights) data layers.
+- **Databricks & PySpark Job Orchestration**: High-throughput distributed processing for enterprise schema inference, header extraction, and data transformations.
+- **AI-Powered Natural Language Querying (NLQ)**: Integrated Azure AI Inference & OpenAI LLMs enabling users to explore and query complex datasets using plain English.
+- **Enterprise Auth & Fine-Grained RBAC**: Azure Entra ID (MSAL PKCE) authentication with granular permissions (`VIEWER`, `USER`, `ADMIN`, `OWNER`) for dataset sharing and dataset collaboration.
+- **Dynamic Data Explorer & Visualization Engine**: Real-time SQL-like filtering, custom saved views, column projections, and interactive chart visualization via Recharts.
+- **Native Azure Cloud Integration**: Utilizes Azure Data Lake Storage (ADLS Gen2), Azure Key Vault secrets management, and Azure Static Web Apps.
 
 ---
 
-## 🏗 System Architecture & Medallion Data Flow
+## System Architecture & Medallion Data Flow
 
 ```mermaid
 flowchart TD
@@ -88,7 +88,7 @@ hiltend-etl/
 
 ---
 
-## 🚀 Quick Start Guide
+## Quick Start Guide
 
 ### Prerequisites
 
